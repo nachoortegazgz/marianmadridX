@@ -999,4 +999,3 @@ export function buildInvoiceNumber(date, sequenceNumber) {
     const seq = String(sequenceNumber).padStart(4, '0');
     return `${year}${month}-${seq}`;
 }
-
