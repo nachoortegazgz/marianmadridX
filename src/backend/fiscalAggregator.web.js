@@ -24,13 +24,12 @@ import wixData from "wix-data";
 
 import {
   BUSINESS_COLLECTIONS,
-  OPERATIONAL_COLLECTIONS,
   SDK_CONFIG,
   MOVEMENT_TYPE,
   RECORD_TYPE,
 } from "backend/internalConfig";
 import { makeTraceId, _safeTrim, _roundMoney, withTimeout } from "public/mmUtils";
-import { requireCajero, requireAdmin, requireMarianManager, rateLimiter } from "backend/security";
+import { requireCajero, requireAdmin, rateLimiter } from "backend/security";
 import { logger } from "backend/logger";
 
 import { _toPublicError } from "backend/responseUtils";
@@ -85,7 +84,7 @@ function _readTaxRate(m) {
 }
 
 function _readMovementType(m) {
-  return _safeTrim(m.movementType ?? m.movementType);
+  return _safeTrim(m.movementType ?? m.tipoMovimiento);
 }
 
 function _readOperationNature(m) {
@@ -250,7 +249,7 @@ function _accumulatePage(items, state) {
 async function _fetchQuarterMovements(months, options = {}) {
   const { traceId = makeTraceId("fiscal-fetch"), limit = MAX_PAGES, pageSize = CHUNK_PAGE_SIZE } = options;
   let allItems = [];
-  let query = wixData.query(OPERATIONAL_COLLECTIONS.MOVIMIENTOS_CAJA)
+  let query = wixData.query(OPERATIONAL_BUSINESS_COLLECTIONS.MOVIMIENTOS_CAJA)
     .hasSome("fiscalPeriod", months)
     .ascending("sequenceNumber")
     .limit(pageSize);
@@ -394,12 +393,13 @@ export async function getLibroRegistroFacturasExpedidasInternal(year, quarter, o
     const isTip = operationNature === "PROPINA" || movementType === MOVEMENT_TYPE.PROPINA;
     const isAdjustment = operationNature === "AJUSTE" || movementType === MOVEMENT_TYPE.AJUSTE;
     const isRefund = operationNature === "DEVOLUCION" || movementType === MOVEMENT_TYPE.REEMBOLSO || accountingAmount < 0;
+    const recordHash = _readRecordHash(m);
 
     libroFilas.push({
       orden: orderIndex++,
       invoiceNumber: _readInvoiceNumber(m),
       fechaExpedicion: _readOperationDate(m),
-      tipoFactura: isRefund ? "R1" : (isTip || isAdjustment ? "BORRADOR_INTERNO" : "BORRADOR_INTERNO"),
+      tipoFactura: isRefund ? "R1" : "BORRADOR_INTERNO",
       movementType: _readMovementType(m),
       operationNature: operationNature || "VENTA",
       taxTreatment: _safeTrim(m.taxTreatment) || "PENDIENTE_VALIDACION",
@@ -415,8 +415,8 @@ export async function getLibroRegistroFacturasExpedidasInternal(year, quarter, o
       orderId: _safeTrim(m.orderId) || null,
       refundId: _safeTrim(m.refundId) || null,
       fechaHoraRegistro: m.registeredAt || null,
-      huellaSha256: _readRecordHash(m).slice(0, 8).toUpperCase(),
-      hashCompleto: _readRecordHash(m),
+      huellaSha256: recordHash.slice(0, 8).toUpperCase(),
+      hashCompleto: recordHash,
       reservaVinculada: _readLinkedBookingIds(m) || null,
       transactionId: _safeTrim(m.transactionId),
     });
@@ -470,7 +470,7 @@ async function _getBusinessTaxId(traceId) {
         log.warn("_getBusinessTaxId used legacy EMISOR adapter (no CONFIG_SISTEMA row)", { traceId });
       }
     }
-    const canonical = _safeTrim(item?.nifProductor);
+    const canonical = _safeTrim(item?.producerTaxId || item?.nifProductor);
     if (canonical) return canonical;
     const transitional = _safeTrim(item?.taxId);
     if (transitional) {
