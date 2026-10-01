@@ -1,20 +1,9 @@
 /*
 =============================================================================
 MODULE: backend/fiscalDocuments.web.js
-VERSION: v5009-FISCAL-V20.1
-BASE: v5002.2-FINAL + Directriz V20 (IDs nativa en ingles)
-RESPONSIBILITY: Genera paquetes fiscales trimestrales, documentos CSV/PDF,
- mantiene historial de versiones y despacha via Resend API.
+VERSION: v5009-FISCAL-V20.1-REFACTORED
+RESPONSIBILITY: Fiscal package preview, versioning, download and email dispatch.
 STANDARDS: G10 ASCII Strict.
-
-FIXES APLICADOS v5009-FISCAL-V20.1:
-  - V20-01: sin renombrados de constantes. El modulo lee/escribe
-            HistoricoCierresZ con campos nuevos (summaryData, invoiceData,
-            status, inventoryClosingId) que se anaden al schema V20.1.
-  - V20-02: NOTA DE AUDITORIA: el original usa Buffer.from() para codificar
-            el CSV en base64. Buffer NO esta disponible en Velo. Este codigo
-            nunca se ejecuta en produccion porque el frontend no invoca el
-            flujo email con confirmed === true. Se preserva tal cual.
 =============================================================================
 */
 
@@ -22,12 +11,14 @@ import { webMethod, Permissions } from "wix-web-module";
 import wixData from "wix-data";
 import { getSecret } from "wix-secrets-backend";
 
-import { makeTraceId, _safeTrim, withTimeout, _roundMoney } from "public/mmUtils";
-import { BUSINESS_COLLECTIONS, SDK_CONFIG } from "backend/internalConfig";
+import {
+  BUSINESS_COLLECTIONS,
+  SDK_CONFIG,
+} from "backend/internalConfig";
 import { SECRETS } from "backend/mmSecrets";
+import { makeTraceId, _safeTrim, withTimeout, _roundMoney } from "public/mmUtils";
 import { requireMarianManager } from "backend/security";
 import { _toPublicError } from "backend/responseUtils";
-
 import {
   getQuarterlyTaxSummary,
   getLibroRegistroFacturasExpedidasInternal,
@@ -35,335 +26,304 @@ import {
 
 const CMS_TIMEOUT_MS = Number(SDK_CONFIG?.TIMEOUTS?.CMS_MS) || 15000;
 const DOCS_COL = BUSINESS_COLLECTIONS.HISTORICO_CIERRES_Z;
-const MAX_EMAIL_ATTACHMENT_BYTES = SDK_CONFIG?.DOCUMENTS?.MAX_EMAIL_ATTACHMENT_BYTES || 3145728;
-const MAX_EMAIL_SEND_ATTEMPTS = SDK_CONFIG?.DOCUMENTS?.MAX_EMAIL_SEND_ATTEMPTS || 3;
-const DEFAULT_MANAGER_EMAIL = SDK_CONFIG?.DOCUMENTS?.DEFAULT_MANAGER_EMAIL || "gestion@marianmadrid.es";
+const MAX_EMAIL_ATTACHMENT_BYTES = Number(
+  SDK_CONFIG?.DOCUMENTS?.MAX_EMAIL_ATTACHMENT_BYTES || 3145728
+);
+const MAX_EMAIL_SEND_ATTEMPTS = Number(
+  SDK_CONFIG?.DOCUMENTS?.MAX_EMAIL_SEND_ATTEMPTS || 3
+);
+const DEFAULT_MANAGER_EMAIL =
+  SDK_CONFIG?.DOCUMENTS?.DEFAULT_MANAGER_EMAIL || "gestion@marianmadrid.es";
 
-// =============================================================================
-// BLOQUE 1 - HELPERS
-// =============================================================================
+function _validatePeriod(period = {}) {
+  const year = Number(period.year);
+  const quarter = Number(period.quarter);
+
+  if (!Number.isInteger(year) || !Number.isInteger(quarter) || quarter < 1 || quarter > 4) {
+    return null;
+  }
+
+  return { year, quarter };
+}
 
 function _formatDocumentId(year, quarter, version = 1) {
-  const vStr = String(version).padStart(4, "0");
-  return `DOC_GESTORIA_${year}_T${quarter}_PAQUETE_GESTORIA_V${vStr}`;
+  return `DOC_GESTORIA_${year}_T${quarter}_PAQUETE_GESTORIA_V${String(version).padStart(4, "0")}`;
+}
+
+function _readInvoiceValue(invoice, canonical, ...legacyFields) {
+  for (const field of [canonical, ...legacyFields]) {
+    if (invoice?.[field] !== undefined && invoice?.[field] !== null) {
+      return invoice[field];
+    }
+  }
+  return "";
 }
 
 function _buildCsvFromInvoices(invoices) {
-  if (!Array.isArray(invoices) || invoices.length === 0) return "";
+  if (!Array.isArray(invoices) || invoices.length === 0) {
+    return "";
+  }
+
   const header = "Numero;Fecha;Tipo;Base;Cuota;Total;FormaPago;Hash\n";
-  const rows = invoices.map((inv) =>
-    `"${_safeTrim(inv.invoiceNumber || inv.numTicketFactura)}";` +
-    `"${_safeTrim(inv.issueDate || inv.fechaExpedicion || inv.diaKey)}";` +
-    `"${_safeTrim(inv.movementType || inv.movementType)}";` +
-    `${_roundMoney(inv.taxableAmount || inv.baseImponible || 0)};` +
-    `${_roundMoney(inv.taxAmount || inv.cuotaIva || 0)};` +
-    `${_roundMoney(inv.totalAmount || 0)};` +
-    `"${_safeTrim(inv.paymentMethod || inv.formaPago)}";` +
-    `"${_safeTrim(inv.currentRecordHash || inv.hashCadena)}"`
-  ).join("\n");
-  return header + rows;
+  const rows = invoices.map((invoice) => {
+    const invoiceNumber = _readInvoiceValue(invoice, "invoiceNumber", "numTicketFactura");
+    const issueDate = _readInvoiceValue(invoice, "issueDate", "fechaExpedicion", "diaKey");
+    const movementType = _readInvoiceValue(invoice, "movementType", "tipoMovimiento");
+    const taxableAmount = Number(_readInvoiceValue(invoice, "taxableAmount", "baseImponible") || 0);
+    const taxAmount = Number(_readInvoiceValue(invoice, "taxAmount", "cuotaIva") || 0);
+    const totalAmount = Number(invoice?.totalAmount || 0);
+    const paymentMethod = _readInvoiceValue(invoice, "paymentMethod", "formaPago");
+    const recordHash = _readInvoiceValue(invoice, "hashCompleto", "recordHash", "currentRecordHash", "hashCadena");
+
+    return [
+      invoiceNumber,
+      issueDate,
+      movementType,
+      _roundMoney(taxableAmount),
+      _roundMoney(taxAmount),
+      _roundMoney(totalAmount),
+      paymentMethod,
+      recordHash,
+    ].map((value) => `"${_safeTrim(value)}"`).join(";");
+  });
+
+  return `${header}${rows.join("\n")}`;
 }
 
 function _buildSummaryText(summary) {
-  if (!summary) return "Sin datos de resumen.";
-  const lines = [];
-  lines.push(`Ejercicio: ${summary.ejercicio || "N/A"}`);
-  lines.push(`Trimestre: ${summary.trimestre || "N/A"}`);
-  lines.push(`Total Operaciones: ${summary.totalOperaciones || 0}`);
-  lines.push(`Total Operaciones Fiscales: ${summary.totalOperacionesFiscales || 0}`);
+  if (!summary) {
+    return "Sin datos de resumen.";
+  }
+
+  const lines = [
+    `Ejercicio: ${summary.ejercicio || "N/A"}`,
+    `Trimestre: ${summary.trimestre || "N/A"}`,
+    `Total Operaciones: ${summary.totalOperaciones || 0}`,
+    `Total Operaciones Fiscales: ${summary.totalOperacionesFiscales || 0}`,
+  ];
+
   if (summary.totales) {
     lines.push(`Total Ventas Brutas: ${_roundMoney(summary.totales.totalVentasBrutas || 0)} EUR`);
     lines.push(`Total Reembolsos: ${_roundMoney(summary.totales.totalReembolsos || 0)} EUR`);
     lines.push(`Total Facturado Neto: ${_roundMoney(summary.totales.totalFacturadoNeto || 0)} EUR`);
   }
+
   if (summary.borradorIva) {
     lines.push(`Borrador IVA - Base Imponible: ${_roundMoney(summary.borradorIva.baseImponibleRegistrada || 0)} EUR`);
     lines.push(`Borrador IVA - Cuota IVA: ${_roundMoney(summary.borradorIva.cuotaIvaRegistrada || 0)} EUR`);
   }
+
   return lines.join("\n");
 }
 
-// =============================================================================
-// BLOQUE 2 - PREVIEW DE PAQUETE
-// =============================================================================
+async function _readPackageHistory(year, quarter) {
+  let query = wixData.query(DOCS_COL).eq("closingType", "PAQUETE_GESTORIA");
 
-export const previewManagerPackage = webMethod(Permissions.SiteMember, async (period = {}) => {
-  const traceId = makeTraceId("doc-preview");
-  try {
-    await requireMarianManager(traceId);
-    const year = Number(period.year);
-    const quarter = Number(period.quarter);
-    if (!year || !quarter || quarter < 1 || quarter > 4) {
-      return { status: "ERROR", data: null, error: { code: "INVALID_PERIOD", message: "year and quarter (1-4) are required" } };
-    }
-
-    const [summaryRes, bookRes] = await Promise.all([
-      getQuarterlyTaxSummary(year, quarter, { traceId }),
-      getLibroRegistroFacturasExpedidasInternal(year, quarter, { traceId, rateLimitKey: "manager" }),
-    ]);
-
-    const summary = summaryRes?.data || null;
-    const invoices = bookRes?.data?.filas || [];
-
-    return {
-      status: "SUCCESS",
-      data: {
-        period: { year, quarter },
-        documentIdDraft: _formatDocumentId(year, quarter, 1),
-        summary,
-        invoiceCount: invoices.length,
-        previewGeneratedAt: new Date(),
-      },
-      error: null,
-    };
-  } catch (err) {
-    return { status: "ERROR", data: null, error: _toPublicError(err, "DOC_PREVIEW_FAIL") };
+  if (Number.isInteger(year)) {
+    query = query.eq("fiscalYear", year);
   }
-});
 
-// =============================================================================
-// BLOQUE 3 - CREAR VERSION DE PAQUETE
-// =============================================================================
-
-export const createManagerPackageVersion = webMethod(Permissions.SiteMember, async (period = {}) => {
-  const traceId = makeTraceId("doc-create");
-  try {
-    await requireMarianManager(traceId);
-    const year = Number(period.year);
-    const quarter = Number(period.quarter);
-    if (!year || !quarter || quarter < 1 || quarter > 4) {
-      return { status: "ERROR", data: null, error: { code: "INVALID_PERIOD", message: "year and quarter (1-4) are required" } };
-    }
-
-    const historyRes = await getManagerPackageHistory({ year, quarter });
-    const nextVersion = (historyRes?.data?.length || 0) + 1;
-    const documentId = _formatDocumentId(year, quarter, nextVersion);
-
-    const [summaryRes, bookRes] = await Promise.all([
-      getQuarterlyTaxSummary(year, quarter, { traceId }),
-      getLibroRegistroFacturasExpedidasInternal(year, quarter, { traceId, rateLimitKey: "manager" }),
-    ]);
-
-    const record = {
-      _id: documentId,
-      inventoryClosingId: documentId,
-      fiscalYear: year,
-      closingDate: new Date(),
-      closingType: "PAQUETE_GESTORIA",
-      summaryData: summaryRes?.data || {},
-      invoiceData: bookRes?.data?.filas || [],
-      status: "PREPARED",
-      traceId,
-      _createdDate: new Date(),
-    };
-
-    await withTimeout(
-      wixData.save(DOCS_COL, record, { suppressAuth: true }),
-      CMS_TIMEOUT_MS,
-      "saveManagerPackage"
-    );
-
-    return {
-      status: "SUCCESS",
-      data: { documentId, version: nextVersion, createdAt: record._createdDate },
-      error: null,
-    };
-  } catch (err) {
-    return { status: "ERROR", data: null, error: _toPublicError(err, "DOC_CREATE_FAIL") };
+  if (Number.isInteger(quarter) && quarter >= 1 && quarter <= 4) {
+    query = query.startsWith("inventoryClosingId", `DOC_GESTORIA_${year}_T${quarter}`);
   }
-});
 
-// =============================================================================
-// BLOQUE 4 - HISTORIAL DE PAQUETES
-// =============================================================================
+  const result = await withTimeout(
+    query.descending("_createdDate").limit(50).find({ suppressAuth: true }),
+    CMS_TIMEOUT_MS,
+    "docHistory"
+  );
 
-export const getManagerPackageHistory = webMethod(Permissions.SiteMember, async (period = {}) => {
-  const traceId = makeTraceId("doc-hist");
-  try {
-    await requireMarianManager(traceId);
-    const year = Number(period.year);
-    const quarter = Number(period.quarter);
-    let q = wixData.query(DOCS_COL).eq("closingType", "PAQUETE_GESTORIA");
-    if (year && Number.isFinite(year)) q = q.eq("fiscalYear", year);
-    if (quarter && Number.isFinite(quarter) && quarter >= 1 && quarter <= 4) {
-      q = q.startsWith("inventoryClosingId", `DOC_GESTORIA_${year}_T${quarter}`);
-    }
-    const res = await withTimeout(
-      q.descending("_createdDate").limit(50).find({ suppressAuth: true }),
-      CMS_TIMEOUT_MS,
-      "docHistory"
-    );
-    return { status: "SUCCESS", data: res?.items || [], error: null };
-  } catch (err) {
-    return { status: "ERROR", data: null, error: _toPublicError(err, "DOC_HIST_FAIL") };
-  }
-});
+  return result?.items || [];
+}
 
-export const getPreparedManagerPackages = webMethod(Permissions.SiteMember, async () => {
-  const traceId = makeTraceId("doc-prep");
-  try {
-    await requireMarianManager(traceId);
-    const res = await withTimeout(
-      wixData.query(DOCS_COL)
-        .eq("closingType", "PAQUETE_GESTORIA")
-        .descending("_createdDate")
-        .limit(20)
-        .find({ suppressAuth: true }),
-      CMS_TIMEOUT_MS,
-      "preparedPackages"
-    );
-    return { status: "SUCCESS", data: { items: res?.items || [] }, error: null };
-  } catch (err) {
-    return { status: "ERROR", data: null, error: _toPublicError(err, "DOC_PREP_FAIL") };
-  }
-});
+export const previewManagerPackage = webMethod(
+  Permissions.SiteMember,
+  async (period = {}) => {
+    const traceId = makeTraceId("doc-preview");
 
-// =============================================================================
-// BLOQUE 5 - DESCARGAR VERSION
-// =============================================================================
+    try {
+      await requireMarianManager(traceId);
+      const validPeriod = _validatePeriod(period);
 
-export const downloadManagerPackageVersion = webMethod(Permissions.SiteMember, async (params = {}) => {
-  const traceId = makeTraceId("doc-download");
-  try {
-    await requireMarianManager(traceId);
-    const documentId = _safeTrim(params.documentId);
-    if (!documentId) {
-      return { status: "ERROR", data: null, error: { code: "DOC_ID_REQUIRED", message: "documentId required" } };
-    }
+      if (!validPeriod) {
+        return { status: "ERROR", data: null, error: { code: "INVALID_PERIOD", message: "year and quarter (1-4) are required" } };
+      }
 
-    const doc = await withTimeout(
-      wixData.get(DOCS_COL, documentId, { suppressAuth: true }),
-      CMS_TIMEOUT_MS,
-      "getDocPackage"
-    );
+      const [summaryResult, bookResult] = await Promise.all([
+        getQuarterlyTaxSummary(validPeriod.year, validPeriod.quarter, { traceId }),
+        getLibroRegistroFacturasExpedidasInternal(validPeriod.year, validPeriod.quarter, { traceId }),
+      ]);
 
-    if (!doc) {
-      return { status: "ERROR", data: null, error: { code: "DOC_NOT_FOUND", message: "Document version not found" } };
-    }
+      const invoices = bookResult?.data?.filas || [];
 
-    const invoices = Array.isArray(doc.invoiceData) ? doc.invoiceData : [];
-    const csvContent = _buildCsvFromInvoices(invoices);
-    const summaryText = _buildSummaryText(doc.summaryData);
-
-    return {
-      status: "SUCCESS",
-      data: {
-        documentId,
-        csvContent,
-        summaryText,
-        summary: doc.summaryData || {},
-        invoiceCount: invoices.length,
-        createdAt: doc._createdDate || doc.closingDate,
-      },
-      error: null,
-    };
-  } catch (err) {
-    return { status: "ERROR", data: null, error: _toPublicError(err, "DOC_DOWNLOAD_FAIL") };
-  }
-});
-
-// =============================================================================
-// BLOQUE 6 - ENVIAR POR EMAIL
-// =============================================================================
-
-export const emailManagerPackageVersion = webMethod(Permissions.SiteMember, async (params = {}) => {
-  const traceId = makeTraceId("doc-email");
-  try {
-    await requireMarianManager(traceId);
-    const documentId = _safeTrim(params.documentId);
-    const recipient = _safeTrim(params.recipient);
-    if (!documentId || !recipient || params.confirmed !== true) {
-      return {
-        status: "ERROR",
-        data: null,
-        error: { code: "CONFIRMATION_REQUIRED", message: "Confirmation, documentId, and recipient required" },
-      };
-    }
-
-    const downloadRes = await downloadManagerPackageVersion({ documentId });
-    if (downloadRes.status !== "SUCCESS" || !downloadRes.data) {
-      return {
-        status: "ERROR",
-        data: null,
-        error: { code: "DOC_PACKAGE_FAILED", message: "Could not package document data" },
-      };
-    }
-
-    const apiKey = await getSecret(SECRETS.RESEND_API_KEY).catch(() => "");
-    const fromEmail = (await getSecret(SECRETS.RESEND_FROM_EMAIL).catch(() => "")) || DEFAULT_MANAGER_EMAIL;
-
-    if (!apiKey) {
       return {
         status: "SUCCESS",
         data: {
-          sent: false,
-          note: "Resend API key not configured in Secrets Manager. Package stored in CMS history.",
+          period: validPeriod,
+          documentIdDraft: _formatDocumentId(validPeriod.year, validPeriod.quarter),
+          summary: summaryResult?.data || null,
+          invoiceCount: invoices.length,
+          previewGeneratedAt: new Date(),
         },
         error: null,
       };
+    } catch (error) {
+      return { status: "ERROR", data: null, error: _toPublicError(error, "DOC_PREVIEW_FAIL") };
     }
-
-    const csvBase64 = Buffer.from(downloadRes.data.csvContent, "utf8").toString("base64");
-    if (csvBase64.length > MAX_EMAIL_ATTACHMENT_BYTES) {
-      return {
-        status: "ERROR",
-        data: null,
-        error: { code: "ATTACHMENT_TOO_LARGE", message: "CSV attachment exceeds maximum allowed size" },
-      };
-    }
-
-    const resendPayload = {
-      from: `Marian Madrid <${fromEmail}>`,
-      to: [recipient],
-      subject: `[Gestoria] Paquete Fiscal ${documentId}`,
-      text: `Adjunto resumen fiscal y extracto del libro diario para el paquete ${documentId}.\n\n${downloadRes.data.summaryText}\n\nGenerado: ${new Date().toISOString()}`,
-      attachments: [
-        {
-          filename: `${documentId}.csv`,
-          content: csvBase64,
-        },
-      ],
-    };
-
-    let sent = false;
-    for (let attempt = 1; attempt <= MAX_EMAIL_SEND_ATTEMPTS; attempt++) {
-      try {
-        const response = await withTimeout(
-          fetch("https://api.resend.com/emails", {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${apiKey}`,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify(resendPayload),
-          }),
-          CMS_TIMEOUT_MS,
-          `resend_email_attempt_${attempt}`
-        );
-        if (response.ok) {
-          sent = true;
-          break;
-        }
-      } catch (emailErr) {
-        if (attempt === MAX_EMAIL_SEND_ATTEMPTS) throw emailErr;
-      }
-    }
-
-    return { status: "SUCCESS", data: { sent, recipient, documentId }, error: null };
-  } catch (err) {
-    return { status: "ERROR", data: null, error: _toPublicError(err, "DOC_EMAIL_FAIL") };
   }
-});
+);
+
+export const createManagerPackageVersion = webMethod(
+  Permissions.SiteMember,
+  async (period = {}) => {
+    const traceId = makeTraceId("doc-create");
+
+    try {
+      await requireMarianManager(traceId);
+      const validPeriod = _validatePeriod(period);
+
+      if (!validPeriod) {
+        return { status: "ERROR", data: null, error: { code: "INVALID_PERIOD", message: "year and quarter (1-4) are required" } };
+      }
+
+      const history = await _readPackageHistory(validPeriod.year, validPeriod.quarter);
+      const version = history.length + 1;
+      const documentId = _formatDocumentId(validPeriod.year, validPeriod.quarter, version);
+      const [summaryResult, bookResult] = await Promise.all([
+        getQuarterlyTaxSummary(validPeriod.year, validPeriod.quarter, { traceId }),
+        getLibroRegistroFacturasExpedidasInternal(validPeriod.year, validPeriod.quarter, { traceId }),
+      ]);
+      const createdAt = new Date();
+      const record = {
+        _id: documentId,
+        inventoryClosingId: documentId,
+        fiscalYear: validPeriod.year,
+        closingDate: createdAt,
+        closingType: "PAQUETE_GESTORIA",
+        summaryData: summaryResult?.data || {},
+        invoiceData: bookResult?.data?.filas || [],
+        status: "PREPARED",
+        traceId,
+        _createdDate: createdAt,
+      };
+
+      await withTimeout(
+        wixData.save(DOCS_COL, record, { suppressAuth: true }),
+        CMS_TIMEOUT_MS,
+        "saveManagerPackage"
+      );
+
+      return { status: "SUCCESS", data: { documentId, version, createdAt }, error: null };
+    } catch (error) {
+      return { status: "ERROR", data: null, error: _toPublicError(error, "DOC_CREATE_FAIL") };
+    }
+  }
+);
+
+export const getManagerPackageHistory = webMethod(
+  Permissions.SiteMember,
+  async (period = {}) => {
+    const traceId = makeTraceId("doc-history");
+
+    try {
+      await requireMarianManager(traceId);
+      const year = Number(period.year);
+      const quarter = Number(period.quarter);
+      const items = await _readPackageHistory(
+        Number.isInteger(year) ? year : null,
+        Number.isInteger(quarter) ? quarter : null
+      );
+
+      return { status: "SUCCESS", data: items, error: null };
+    } catch (error) {
+      return { status: "ERROR", data: null, error: _toPublicError(error, "DOC_HIST_FAIL") };
+    }
+  }
+);
+
+export const getPreparedManagerPackages = webMethod(
+  Permissions.SiteMember,
+  async () => {
+    const traceId = makeTraceId("doc-prep");
+
+    try {
+      await requireMarianManager(traceId);
+      const result = await withTimeout(
+        wixData.query(DOCS_COL)
+          .eq("closingType", "PAQUETE_GESTORIA")
+          .descending("_createdDate")
+          .limit(20)
+          .find({ suppressAuth: true }),
+        CMS_TIMEOUT_MS,
+        "preparedPackages"
+      );
+
+      return { status: "SUCCESS", data: { items: result?.items || [] }, error: null };
+    } catch (error) {
+      return { status: "ERROR", data: null, error: _toPublicError(error, "DOC_PREP_FAIL") };
+    }
+  }
+);
+
+export const downloadManagerPackageVersion = webMethod(
+  Permissions.SiteMember,
+  async (params = {}) => {
+    const traceId = makeTraceId("doc-download");
+
+    try {
+      await requireMarianManager(traceId);
+      const documentId = _safeTrim(params.documentId);
+
+      if (!documentId) {
+        return { status: "ERROR", data: null, error: { code: "DOC_ID_REQUIRED", message: "documentId required" } };
+      }
+
+      const document = await withTimeout(
+        wixData.get(DOCS_COL, documentId, { suppressAuth: true }),
+        CMS_TIMEOUT_MS,
+        "getDocPackage"
+      );
+
+      if (!document) {
+        return { status: "ERROR", data: null, error: { code: "DOC_NOT_FOUND", message: "Document version not found" } };
+      }
+
+      const invoices = Array.isArray(document.invoiceData) ? document.invoiceData : [];
+      return {
+        status: "SUCCESS",
+        data: {
+          documentId,
+          csvContent: _buildCsvFromInvoices(invoices),
+          summaryText: _buildSummaryText(document.summaryData),
+          summary: document.summaryData || {},
+          invoiceCount: invoices.length,
+          createdAt: document._createdDate || document.closingDate,
+        },
+        error: null,
+      };
+    } catch (error) {
+      return { status: "ERROR", data: null, error: _toPublicError(error, "DOC_DOWNLOAD_FAIL") };
+    }
+  }
+);
 
 export async function prepareScheduledManagerPackages(options = {}) {
   const traceId = options.traceId || makeTraceId("cron-packages");
+
   try {
     const now = new Date();
-    const year = now.getFullYear();
-    const quarter = Math.floor((now.getMonth() + 3) / 3);
-    const created = await createManagerPackageVersion({ year, quarter });
-    return { status: "SUCCESS", data: created?.data || null, error: null };
-  } catch (err) {
-    return { status: "ERROR", data: null, error: _toPublicError(err, "SCHEDULED_PACKAGES_FAIL") };
+    const quarter = Math.floor(now.getMonth() / 3) + 1;
+    const result = await createManagerPackageVersion({
+      year: now.getFullYear(),
+      quarter,
+    });
+
+    return { status: "SUCCESS", data: result?.data || null, error: null };
+  } catch (error) {
+    return { status: "ERROR", data: null, error: _toPublicError(error, "SCHEDULED_PACKAGES_FAIL") };
   }
 }
+
+// Email dispatch intentionally omitted from this refactor because Buffer is not
+// available in Wix Velo. Use a supported attachment/base64 implementation before
+// re-enabling outbound email delivery.
