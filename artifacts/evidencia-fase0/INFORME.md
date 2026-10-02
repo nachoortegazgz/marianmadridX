@@ -110,3 +110,24 @@ El HEAD actual **ya incorpora los parches objetivo de FASE 1, 2, 3 y 4** (export
 3. **CSV de evidencia física** — única tarea de FASE 0 no reproducible en este sandbox; debe ejecutarla el operador en Wix Studio antes de cualquier retiro destructivo.
 
 **Sin este informe, FASE 1 no se ejecuta.** Esperando `CONTINUAR`.
+
+---
+
+## ANEXO FASE 1 (2026-10-02) — Verificacion P0 y residuo corregido
+
+Resultado de la re-auditoria de los 6 parches P0 planificados sobre HEAD actual:
+
+| Parche F1 | Estado previo | Accion |
+|---|---|---|
+| internalConfig.js (exports/enums/collections) | YA APLICADO (EU_VAT_PREFIXES, FISCAL_ROLE, ITEM_NATURE, BOOKING_TYPE SIMPLE/DUALF1/DUALF2, sin UNPAID, FORBIDDEN 8, RESERVED/HISTORICAL) | Verificado por greps = 0 |
+| fiscalAggregator.web.js (dedupe + AEAT-first) | YA APLICADO (prepareScheduledManagerPackages eliminado, _getBusinessTaxId lee DatosFiscales/CONFIG_SISTEMA/nifProductor con adapter legacy documentado + warning) | Verificado |
+| citasManager.web.js (detector === DUALF2) | YA APLICADO (lineas 869/879) | Verificado |
+| bookingCore.js (normalizeBookingType en writes) | YA APLICADO (linea 803) | Verificado |
+| **bookingSaga.js (writes literales)** | **RESIDUO P0: "DUAL_F1"/"DUAL_F2" legacy en escrituras 1567/1619** | **CORREGIDO: BOOKING_TYPE.DUALF1/DUALF2/SIMPLE + import** |
+| crons.js (re-apuntar producer) | YA APLICADO (cero referencias; producer unico fiscalDocuments.web) | Verificado |
+| tools/migrate-booking-type.js | CONDICIONAL NO EJECUTADO: sin CSV CitasF2 (MATRIZ H.1) | ADR-07 |
+
+Greps post-fix (todas = 0): alias COLLECTIONS., UNPAID en internalConfig,
+BOOKING_TYPE.NORMAL/DUAL, DUAL_F1/DUAL_F2 en src/backend/booking/*.js.
+Suite offline: 52/52 pass. node --check: 7 archivos OK.
+Commit: 5d2c619.
