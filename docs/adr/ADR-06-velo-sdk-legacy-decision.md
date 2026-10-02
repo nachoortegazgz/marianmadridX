@@ -121,6 +121,11 @@ Se mantiene Wix Bookings V2 y Stores Catalog V1 segun la Biblia del
 proyecto. Sin migracion a Catalog V3. El SDK v2 se usa solo como cliente
 oficial, nunca como nueva fuente de verdad.
 
+POST-AUDITORIA 2026-10-02: esta decision fue re-verificada con evidencia
+fisica (barrido completo de src/, package.json y wix.lock) y ampliada con
+el analisis tecnico de impacto en ADR-07 (`docs/adr/ADR-07-catalog-v3-analysis.md`):
+superficie Stores real = cero codigo propio; decision NO MIGRAR confirmada.
+
 ## Consecuencias
 
 - Riesgo bajo: todas las modificaciones de Etapa A son sintaxis/contrato o
