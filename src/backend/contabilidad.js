@@ -29,7 +29,7 @@ FIXES APLICADOS v5007.8 (heredados):
 import wixData from "wix-data";
 import { getSecret } from "wix-secrets-backend";
 import {
-    OPERATIONAL_COLLECTIONS,
+    BUSINESS_COLLECTIONS,
     SDK_CONFIG,
     MOVEMENT_TYPE,
     ACCOUNTING_ACCOUNT,
@@ -211,7 +211,23 @@ function _linePayload(line) {
 async function _asAccountingLine(base, number, accountCode, accountName, debit, credit, tax = null) {
     const line = {
         _id: `${base.journalEntryId}_L${String(number).padStart(3, "0")}`,
+        // SSOT v20.1 (FASE4): discriminator required by the approved detail
+        // collection so ACCOUNTING_LINE rows never collide with PURCHASE_DETAIL
+        // or fiscal-payload rows projected by eventLog.js.
+        recordType: "ACCOUNTING_LINE",
         journalEntryId: base.journalEntryId,
+        // SSOT v20.1 (FASE4): the LibroAsientosContablesDetalle beforeInsert
+        // hook enforces the full AEAT FK contract (sourceEventId / thirdPartyId
+        // / catalogId as GUIDs) whenever ANY source linkage field is present.
+        // Accounting lines are ledger-derived projections, not AEAT invoice
+        // rows, so they must NOT assert that contract: they carry only the
+        // internal projection schema version plus a non-FK audit reference.
+        // The previous "sourceEventId" key tripped the hook and every insert
+        // would have failed with SCHEMA_VIOLATION thirdPartyId obligatorio.
+        schemaVersion: SCHEMA_VERSION,
+        sourceLedgerId: base.sourceId || null,
+        units: 1,
+        operationDescription: base.description,
         transactionId: base.transactionId || null,
         lineNumber: number,
         operationDate: base.operationDate,
@@ -294,21 +310,31 @@ function _findAccountMap(movementType) {
     return _getDefaultAccountMap(movementType);
 }
 
+// SSOT v20.1 (FASE4): accounting lines live in the approved detail collection
+// LibroAsientosContablesDetalle with recordType "ACCOUNTING_LINE". The fiscal
+// ledger MovimientosCaja is append-only and MUST NOT receive accounting rows;
+// it also never carried a journalEntryId _id, so the previous lookups could
+// never resolve. Queries are scoped by journalEntryId to stay idempotent.
 async function _getExisting(journalEntryId) {
-    return wixData
-        .get(OPERATIONAL_COLLECTIONS.MOVIMIENTOS_CAJA, journalEntryId, { suppressAuth: true, consistentRead: true })
+    const res = await wixData
+        .query(BUSINESS_COLLECTIONS.LIBRO_ASIENTOS_CONTABLES_DETALLE)
+        .eq("journalEntryId", journalEntryId)
+        .eq("recordType", "ACCOUNTING_LINE")
+        .limit(1)
+        .find({ suppressAuth: true, consistentRead: true })
         .catch(() => null);
+    return res?.items?.[0] || null;
 }
 
 async function _insertLineIfMissing(line) {
     const existing = await wixData
-        .get(OPERATIONAL_COLLECTIONS.MOVIMIENTOS_CAJA, line._id, { suppressAuth: true, consistentRead: true })
+        .get(BUSINESS_COLLECTIONS.LIBRO_ASIENTOS_CONTABLES_DETALLE, line._id, { suppressAuth: true, consistentRead: true })
         .catch(() => null);
 
     if (existing) return { idempotent: true, item: existing };
 
     const inserted = await wixData.insert(
-        OPERATIONAL_COLLECTIONS.MOVIMIENTOS_CAJA, line, { suppressAuth: true }
+        BUSINESS_COLLECTIONS.LIBRO_ASIENTOS_CONTABLES_DETALLE, line, { suppressAuth: true }
     );
     return { idempotent: false, item: inserted };
 }
