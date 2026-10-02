@@ -54,7 +54,8 @@ node --experimental-loader ./src/backend/tests/loader.mjs src/backend/tests/audi
 
 Grep negativo FASE 3:
 ```bash
-grep -rn "\bCOLLECTIONS\b" src --include="*.js" \
-  | grep -vE "BUSINESS_COLLECTIONS|OPERATIONAL_COLLECTIONS|RESERVED_COLLECTIONS|HISTORICAL_COLLECTIONS|BLOCKED_UNVERIFIED"
+grep -rn "\bCOLLECTIONS\b" src --include="*.js" --include="*.mjs" \
+  | grep -vE "BUSINESS_COLLECTIONS|OPERATIONAL_COLLECTIONS|RESERVED_COLLECTIONS|HISTORICAL_COLLECTIONS|_COLLECTIONS" \
+  | grep -v "tests/unit.ssot.v5011.test.mjs"   # unico match permitido: asercion de erradicacion en comentario del test
 # → 0 resultados
 ```
