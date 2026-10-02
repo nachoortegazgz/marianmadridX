@@ -783,68 +783,30 @@ export function DatosFiscales_beforeUpdate(item) {
 }
 
 // =============================================================================
-// BLOQUE 12 - FACTURAS RECIBIDAS
+// BLOQUE 12 - FACTURAS RECIBIDAS (PROHIBIDA SSOT v20.1 / BIBLIA 6)
 // =============================================================================
+// FASE4: FacturasRecibidas esta en FORBIDDEN_COLLECTIONS. El evento de compra
+// permanece en MovimientosCaja y su detalle en LibroAsientosContablesDetalle
+// con recordType "PURCHASE_DETAIL" (eventLog.js). Los hooks anteriores
+// validaban un esquema de una coleccion que ya no admite escrituras; ahora
+// bloquean cualquier intento residual (incluido legacy data migrada).
 
-export function FacturasRecibidas_beforeInsert(item) {
-    if (!item || typeof item !== "object") return item;
-
-    const issuerTaxId = _safeTrim(item.issuerTaxId || item.nifEmisor);
-    if (!issuerTaxId || !_isValidNifOrEuVat(issuerTaxId)) {
-        _schemaError("FacturasRecibidas requiere issuerTaxId valido (espanol o VAT UE)");
-    }
-
-    if (!_safeTrim(item.issuerLegalName || item.nombreRazonEmisor)) {
-        _schemaError("FacturasRecibidas requiere issuerLegalName");
-    }
-
-    const thirdPartyId = _safeTrim(item.thirdPartyId || item.terceroId);
-    if (!_isGuid(thirdPartyId)) {
-        _schemaError("FacturasRecibidas requiere thirdPartyId (FK DatosFiscales)");
-    }
-
-    const sourceEventId = _safeTrim(item.sourceEventId || item.eventoOrigenId);
-    if (!_isGuid(sourceEventId)) {
-        _schemaError("FacturasRecibidas requiere sourceEventId (FK MovimientosCaja)");
-    }
-
-    const base = Number(item.totalTaxableBase || item.baseImponibleTotal) || 0;
-    const tax = Number(item.totalVatAmount || item.cuotaIvaTotal) || 0;
-    const surcharge = Number(item.surchargeAmount || item.cuotaRecargoEquivalencia) || 0;
-    const withholding = Number(item.irpfWithholdingAmount || item.importeRetencionIRPF) || 0;
-    const total = Number(item.totalAmount || item.importeTotal) || 0;
-
-    if (base || tax || surcharge || withholding || total) {
-        const expected = _roundItem(base + tax + surcharge - withholding);
-        if (Math.abs(expected - total) > 0.02) {
-            _schemaError(
-                `Factura recibida descuadra: base ${base} + IVA ${tax} + RE ${surcharge} - ret ${withholding} = ${expected.toFixed(2)}, total ${total.toFixed(2)}`
-            );
-        }
-    }
-
-    // Cuadre detailedBreakdown si viene
-    if (Array.isArray(item.detailedBreakdown) && item.detailedBreakdown.length > 0) {
-        let sumBase = 0;
-        let sumTax = 0;
-        for (const d of item.detailedBreakdown) {
-            sumBase += Number(d.taxableBaseOrNonSubjectAmount ?? d.base ?? 0);
-            sumTax += Number(d.chargedTaxAmount ?? d.cuota ?? 0);
-        }
-        if (Math.abs(_roundItem(sumBase) - base) > 0.02) {
-            _schemaError("FacturasRecibidas detailedBreakdown.base no cuadra");
-        }
-        if (Math.abs(_roundItem(sumTax) - tax) > 0.02) {
-            _schemaError("FacturasRecibidas detailedBreakdown.cuota no cuadra");
-        }
-    }
-
-    return item;
+export function FacturasRecibidas_beforeInsert() {
+    _fiscalError(
+        "FacturasRecibidas esta prohibida por la SSOT: registrar compras en MovimientosCaja + LibroAsientosContablesDetalle (PURCHASE_DETAIL)"
+    );
 }
 
-export function FacturasRecibidas_beforeUpdate(item) {
-    // No se bloquea el update (permite cambios de estado de pago, adjuntos, etc.)
-    return item;
+export function FacturasRecibidas_beforeUpdate() {
+    _fiscalError(
+        "FacturasRecibidas esta prohibida por la SSOT: no se admiten actualizaciones"
+    );
+}
+
+export function FacturasRecibidas_beforeRemove() {
+    _fiscalError(
+        "FacturasRecibidas esta prohibida por la SSOT: no se admiten eliminaciones"
+    );
 }
 
 // =============================================================================

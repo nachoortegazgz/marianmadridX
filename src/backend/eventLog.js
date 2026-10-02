@@ -604,11 +604,30 @@ async function _proyectarAsientoContable(cabecera, traceId) {
     try {
         const { projectLedgerMovementToAccounting } = await import("backend/contabilidad");
         const res = await projectLedgerMovementToAccounting(cabecera);
-        if (res?.status !== "SUCCESS" && res?.status !== "SKIPPED") {
+        // SKIPPED: proyeccion deliberadamente desactivada o sin mapa aprobado
+        // (SDK_CONFIG.ACCOUNTING.ENABLED=false). No es un fallo de proyeccion.
+        // PROJECTED: destino contable no verificado aun; se devuelve la
+        // proyeccion firmada sin persistir (ver contabilidad.js). Tampoco es
+        // un error y no debe lanzarse como tal.
+        if (res?.status !== "SUCCESS" && res?.status !== "SKIPPED" && res?.status !== "PROJECTED") {
             throw new Error(`contabilidad.js: ${res?.status || "UNKNOWN"}`);
         }
     } catch (err) {
         log.warn("Proyeccion contable fallo", { traceId, eventoId: cabecera._id, message: err?.message });
+        // SSOT v20.1 (FASE4): las lineas contables se escriben en
+        // LibroAsientosContablesDetalle (recordType ACCOUNTING_LINE), que NO
+        // es el ledger append-only MovimientosCaja. El hook
+        // MovimientosCaja_beforeUpdate bloquearia cualquier update de estado
+        // de proyeccion sobre la cabecera, por lo que no puede abrirse una
+        // excepcion silenciosa al append-only. La trazabilidad alternativa es
+        // esta marca de auditoria en el log para el reconciliador/manual.
+        log.warn("PROJECTION_UNCONFIRMED", {
+            traceId,
+            sourceEventId: cabecera?._id || null,
+            targetCollection:
+                BUSINESS_COLLECTIONS.LIBRO_ASIENTOS_CONTABLES_DETALLE,
+            recordType: "ACCOUNTING_LINE",
+        });
         throw err;
     }
 }

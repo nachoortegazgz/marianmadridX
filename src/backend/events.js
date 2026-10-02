@@ -55,6 +55,7 @@ import {
     EVENT_TYPE,
     THIRD_PARTY_TYPE,
     VAT_ACCRUAL_STATUS,
+    IVA_RATES,
 } from "backend/internalConfig";
 
 import { SECRETS } from "backend/mmSecrets";
@@ -365,23 +366,30 @@ async function _markCitasRefundedByBookingIds(bookingIds, orderId, refundId, ful
     }
 }
 
-async function _markCitasPaidByBookingIds(bookingIds, orderId, traceId) {
+async function _markCitasPaidByBookingIds(bookingIds, orderId, cashMovementId, traceId) {
     const ids = _normalizeBookingIds(bookingIds);
     const results = await Promise.allSettled(
         ids.map((bookingId) =>
             _updateCitaSafe(bookingId, (cita) => {
                 const meta = cita.meta || {};
                 const alreadyPaid = String(meta.paymentStatus || cita.paymentStatus || "").toUpperCase() === PAYMENT_STATUS.PAID;
-                if (alreadyPaid) return null;
+                // Idempotencia: si ya esta pagada con el MISMO movimiento de caja, no reescribir.
+                if (alreadyPaid && cita.cashMovementId === cashMovementId) return null;
                 return {
                     ...cita,
                     [BOOKING_FIELDS.STATUS]: BOOKING_STATUS.CONFIRMED,
                     [BOOKING_FIELDS.PAYMENT_STATUS]: PAYMENT_STATUS.PAID,
+                    // SSOT v20.1: proyeccion canonica del enlace fiscal
+                    cashMovementId: cashMovementId || null,
+                    orderId: orderId || null,
+                    traceId,
                     meta: {
                         ...meta,
                         paymentStatus: PAYMENT_STATUS.PAID,
+                        cashMovementId: cashMovementId || null,
                         orderId: orderId || null,
                         fechaConfirmacionPago: new Date(),
+                        traceId,
                     },
                 };
             }, traceId, "events_markPaid")
@@ -642,8 +650,14 @@ export async function wixEcom_onOrderPaymentStatusUpdated(rawBody) {
 
         if (existingLedgerRes?.items?.length > 0) {
             if (bookingIds.length) {
+                // SSOT v20.1: reutilizar la cabecera del ledger existente para
+                // no perder el enlace fiscal cashMovementId en el webhook duplicado.
+                const existingCashMovementId =
+                    existingLedgerRes.items[0]?.cabeceraId ||
+                    existingLedgerRes.items[0]?._id ||
+                    null;
                 await _executeWithRetry(async () => {
-                    await _markCitasPaidByBookingIds(bookingIds, orderId, traceId);
+                    await _markCitasPaidByBookingIds(bookingIds, orderId, existingCashMovementId, traceId);
                 }, WEBHOOK_RETRIES, WEBHOOK_RETRY_DELAY_MS);
             }
             if (eventId) {
@@ -661,7 +675,9 @@ export async function wixEcom_onOrderPaymentStatusUpdated(rawBody) {
         if (finalLedgerAmount <= 0) {
             if (bookingIds.length) {
                 await _executeWithRetry(async () => {
-                    await _markCitasPaidByBookingIds(bookingIds, orderId, traceId);
+                    // Zero-amount orders have no ledger cash movement; the
+                    // projection is explicitly null-linked (auditoria 5.2).
+                    await _markCitasPaidByBookingIds(bookingIds, orderId, null, traceId);
                 }, WEBHOOK_RETRIES, WEBHOOK_RETRY_DELAY_MS);
             }
             if (eventId) {
@@ -675,6 +691,17 @@ export async function wixEcom_onOrderPaymentStatusUpdated(rawBody) {
                 ? `Pedido Mixto Cita + Tienda ${orderId}`
                 : `Reserva Online ${orderId}`)
             : `Venta Online Tienda ${orderId}`;
+
+        // SSOT v20.1 / auditoria 5.3: fiscalidad online coherente. El importe
+        // del ledger es IVA INCLUIDO, por lo que base y cuota se derivan del
+        // total con el tipo general (IVA_RATES.GENERAL). Queda erradicado el
+        // patron legacy "taxAmount: 0, taxRate: 21" y la cabecera y el
+        // desglose deben usar exactamente los mismos valores.
+        const onlineTaxRate = IVA_RATES.GENERAL;
+        const onlineTaxableBase =
+            Math.round((finalLedgerAmount / (1 + onlineTaxRate)) * 100) / 100;
+        const onlineTaxAmount =
+            Math.round((finalLedgerAmount - onlineTaxableBase) * 100) / 100;
 
         // Extraer datos fiscales AEAT
         const fiscalData = _extractFiscalDataFromOrder(order);
@@ -692,9 +719,9 @@ export async function wixEcom_onOrderPaymentStatusUpdated(rawBody) {
                 totalAmount: finalLedgerAmount,
                 taxableBaseOrNonSubjectAmount: fiscalData.withholdingBase > 0
                     ? fiscalData.withholdingBase
-                    : 0,
-                taxAmount: 0,
-                taxRate: 21,
+                    : onlineTaxableBase,
+                taxAmount: onlineTaxAmount,
+                taxRate: onlineTaxRate,
                 irpfWithholdingAmount: fiscalData.irpfWithholdingAmount,
                 irpfWithholdingRate: fiscalData.irpfWithholdingRate,
                 withholdingBase: fiscalData.withholdingBase,
@@ -717,11 +744,11 @@ export async function wixEcom_onOrderPaymentStatusUpdated(rawBody) {
                 transactionId,
                 orderId,
                 breakdown: [{
-                    base: fiscalData.withholdingBase > 0
+                    taxableBaseOrNonSubjectAmount: fiscalData.withholdingBase > 0
                         ? fiscalData.withholdingBase
-                        : finalLedgerAmount,
-                    tipo: 21,
-                    cuota: 0,
+                        : onlineTaxableBase,
+                    taxRate: onlineTaxRate,
+                    chargedTaxAmount: onlineTaxAmount,
                     operationDescription: orderConcept,
                     units: 1,
                     magnitude: 1,
@@ -734,6 +761,24 @@ export async function wixEcom_onOrderPaymentStatusUpdated(rawBody) {
         }
 
         const ledgerOk = eventResult?.status === "SUCCESS" || eventResult?.status === "PARTIAL";
+
+        // SSOT v20.1 / auditoria 5.2: una cita no puede proyectarse como pagada
+        // sin la referencia del movimiento fiscal append-only que la respalda.
+        const cashMovementId = ledgerOk
+            ? (eventResult?.data?.cabeceraId || null)
+            : null;
+
+        if (ledgerOk && bookingIds.length && !cashMovementId) {
+            log.error("LEDGER_REFERENCE_MISSING", { orderId, traceId });
+            await logAuditEventWithTimeout(
+                "LEDGER_REFERENCE_MISSING",
+                "ERROR",
+                `Ledger registrado sin cabecera para orden ${orderId}`,
+                { orderId, traceId },
+                traceId, orderId, "backend/events.js"
+            );
+            return { status: "ERROR", error: { code: "LEDGER_REFERENCE_MISSING", message: "Ledger registered without cash movement reference." } };
+        }
 
         if (ledgerOk) {
             // [FIX-56] Inventario DESPUES del ledger
@@ -755,7 +800,7 @@ export async function wixEcom_onOrderPaymentStatusUpdated(rawBody) {
 
             if (bookingIds.length) {
                 await _executeWithRetry(async () => {
-                    await _markCitasPaidByBookingIds(bookingIds, orderId, traceId);
+                    await _markCitasPaidByBookingIds(bookingIds, orderId, cashMovementId, traceId);
                 }, WEBHOOK_RETRIES, WEBHOOK_RETRY_DELAY_MS);
             }
             if (eventId) {

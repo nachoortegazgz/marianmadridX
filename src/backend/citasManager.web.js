@@ -408,10 +408,40 @@ export const confirmPayment = webMethod(
         };
       }
 
+      // SSOT v20.1: una cita no puede marcarse como pagada sin referencia al
+      // movimiento fiscal append-only que la respalda.
+      const cashMovementId =
+        ledgerResult?.data?.cabeceraId ||
+        ledgerResult?.data?._id ||
+        null;
+
+      if (!cashMovementId) {
+        await logAuditEvent(
+          "PAYMENT_LEDGER_FAILED",
+          "ERROR",
+          "Ledger registered without cash movement reference.",
+          { orderId, traceId, error: "LEDGER_REFERENCE_MISSING" },
+          traceId,
+          orderId,
+          AUDIT_SOURCE
+        );
+
+        return {
+          status: "ERROR",
+          data: null,
+          error: {
+            code: "LEDGER_REFERENCE_MISSING",
+            message:
+              "Payment could not be confirmed: ledger reference missing."
+          }
+        };
+      }
+
       await _setCitasPaymentState(
         citas,
         PAYMENT_STATUS.PAID,
         orderId,
+        cashMovementId,
         traceId
       );
 
@@ -644,6 +674,7 @@ async function _setCitasPaymentState(
   citas,
   paymentState,
   orderId,
+  cashMovementId,
   traceId
 ) {
   for (const cita of citas) {
@@ -670,10 +701,16 @@ async function _setCitasPaymentState(
           // ADR-06: campo canonico bookingStatus (no 'status')
           bookingStatus: BOOKING_STATUS.CONFIRMED,
           paymentStatus: paymentState,
+          // SSOT v20.1: trazabilidad fiscal en el nivel canonico del documento
+          cashMovementId: cashMovementId || null,
+          orderId: orderId || null,
+          traceId,
           meta: {
             ...meta,
             paymentStatus: paymentState,
+            cashMovementId: cashMovementId || null,
             orderId: orderId || null,
+            traceId,
             fechaConfirmacionPago:
               new Date()
           }
