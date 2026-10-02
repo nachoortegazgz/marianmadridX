@@ -47,7 +47,7 @@ Cada commit es revertible de forma independiente; la suite se mantiene verde tra
 
 ```bash
 node --check $(find src -name "*.js")            # sintaxis OK
-node --experimental-loader ./src/backend/tests/loader.mjs --test src/backend/tests/   # 52/52
+node --experimental-loader ./src/backend/tests/loader.mjs --test src/backend/tests/   # 57/57 (52 base + suite crons.jobsConfigParity; re-ejecutado 2026-10-02)
 node --experimental-loader ./src/backend/tests/loader.mjs src/backend/tests/unit.testRunner.runner.mjs  # 10/10
 node --experimental-loader ./src/backend/tests/loader.mjs src/backend/tests/audit.e2e.runner.mjs        # 1/1
 ```
