@@ -249,7 +249,7 @@ function _accumulatePage(items, state) {
 async function _fetchQuarterMovements(months, options = {}) {
   const { traceId = makeTraceId("fiscal-fetch"), limit = MAX_PAGES, pageSize = CHUNK_PAGE_SIZE } = options;
   let allItems = [];
-  let query = wixData.query(OPERATIONAL_BUSINESS_COLLECTIONS.MOVIMIENTOS_CAJA)
+  let query = wixData.query(BUSINESS_COLLECTIONS.MOVIMIENTOS_CAJA)
     .hasSome("fiscalPeriod", months)
     .ascending("sequenceNumber")
     .limit(pageSize);
