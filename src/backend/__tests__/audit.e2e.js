@@ -7,7 +7,7 @@ Propósito: Simular flujos completos y verificar integridad de datos
 */
 
 // FASE4-CONSOLIDADO: imports alineados al SSOT canonico (los nombres legacy
-// COLLECTIONS/ESTADO_*/TIPO_MOVIMIENTO/FORMA_PAGO/CLAVES_AEAT/CUENTAS_PGC/ROL_FISCAL
+// GRUPOS_DE_COLECCIONES/ESTADO_*/TIPO_MOVIMIENTO/FORMA_PAGO/CLAVES_AEAT/CUENTAS_PGC/ROL_FISCAL
 // fueron erradicados de internalConfig). Assertions equivalentes, no debilitadas.
 import {
     BUSINESS_COLLECTIONS,

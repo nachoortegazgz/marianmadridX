@@ -16,7 +16,14 @@ CORRECTIONS (heredadas): CRON-01..CRON-06.
 */
 
 import wixData from "wix-data";
-import { COLLECTIONS, SDK_CONFIG, CONCURRENCY } from "backend/internalConfig";
+import {
+    BUSINESS_COLLECTIONS,
+    OPERATIONAL_COLLECTIONS,
+    CONTROL_TYPE,
+    CONTROL_STATUS,
+    SDK_CONFIG,
+    CONCURRENCY,
+} from "backend/internalConfig";
 import { makeTraceId, _safeTrim, _looksLikeGuid, withTimeout } from "public/mmUtils";
 import { logger } from "backend/logger";
 import { verifyFiscalHashChainIntegrity } from "backend/cajas.web";
@@ -41,7 +48,8 @@ export async function cleanExpiredLocks() {
     try {
         const now = new Date();
         const res = await wixData
-            .query(COLLECTIONS.SLOT_LOCKS)
+            .query(OPERATIONAL_COLLECTIONS.CONTROL_OPERATIVO)
+            .eq("controlType", CONTROL_TYPE.SLOT_LOCK)
             .lt("expiresAt", now)
             .limit(100)
             .find({ suppressAuth: true });
@@ -49,7 +57,7 @@ export async function cleanExpiredLocks() {
         let removed = 0;
         for (const item of res?.items || []) {
             await wixData
-                .remove(COLLECTIONS.SLOT_LOCKS, item._id, { suppressAuth: true })
+                .remove(OPERATIONAL_COLLECTIONS.CONTROL_OPERATIVO, item._id, { suppressAuth: true })
                 .catch(() => null);
             removed++;
         }
@@ -72,7 +80,8 @@ export async function cleanupExpiredDualCache() {
             Number(SDK_CONFIG?.JOBS?.DUAL_CACHE_CLEANUP_LIMIT) || 100;
 
         const res = await wixData
-            .query(COLLECTIONS.DUAL_SLOT_CACHE)
+            .query(OPERATIONAL_COLLECTIONS.CONTROL_OPERATIVO)
+            .eq("controlType", CONTROL_TYPE.DUAL_CACHE)
             .lt("expiresAt", now)
             .limit(limit)
             .find({ suppressAuth: true });
@@ -80,7 +89,7 @@ export async function cleanupExpiredDualCache() {
         let removed = 0;
         for (const item of res?.items || []) {
             await wixData
-                .remove(COLLECTIONS.DUAL_SLOT_CACHE, item._id, {
+                .remove(OPERATIONAL_COLLECTIONS.CONTROL_OPERATIVO, item._id, {
                     suppressAuth: true,
                 })
                 .catch(() => null);
@@ -173,8 +182,9 @@ export async function runPendingCompensationsJob() {
     const traceId = makeTraceId("cron-comp");
     try {
         const res = await wixData
-            .query(COLLECTIONS.COMPENSACIONES_PENDIENTES)
-            .in("status", ["PENDING", "RETRYING", "PENDING_RECOVERY"])
+            .query(OPERATIONAL_COLLECTIONS.CONTROL_OPERATIVO)
+            .eq("controlType", CONTROL_TYPE.COMPENSATION)
+            .in("status", [CONTROL_STATUS.PENDING, CONTROL_STATUS.FAILED])
             .lt("attempts", MAX_COMPENSATION_ATTEMPTS)
             .limit(
                 Number(SDK_CONFIG?.JOBS?.FISCAL_RECOVERY_BATCH_SIZE) || 25
@@ -188,11 +198,11 @@ export async function runPendingCompensationsJob() {
             try {
                 await _runOneCompensation(comp, traceId);
 
-                comp.status = "COMPLETED";
+                comp.status = CONTROL_STATUS.EXECUTED;
                 comp.lastError = null;
                 comp._updatedDate = new Date();
                 await wixData.update(
-                    COLLECTIONS.COMPENSACIONES_PENDIENTES,
+                    OPERATIONAL_COLLECTIONS.CONTROL_OPERATIVO,
                     comp, { suppressAuth: true }
                 );
                 processed++;
@@ -201,11 +211,11 @@ export async function runPendingCompensationsJob() {
                 comp.attempts = attempts;
                 comp.lastError = compErr?.message || "UNKNOWN";
                 comp.status =
-                    attempts >= MAX_COMPENSATION_ATTEMPTS ? "FAILED" : "RETRYING";
+                    attempts >= MAX_COMPENSATION_ATTEMPTS ? CONTROL_STATUS.FAILED : CONTROL_STATUS.PENDING;
                 comp._updatedDate = new Date();
 
                 await wixData
-                    .update(COLLECTIONS.COMPENSACIONES_PENDIENTES, comp, {
+                    .update(OPERATIONAL_COLLECTIONS.CONTROL_OPERATIVO, comp, {
                         suppressAuth: true,
                     })
                     .catch(() => null);
@@ -215,7 +225,9 @@ export async function runPendingCompensationsJob() {
                 if (comp.status === "FAILED" || comp.alertRequired === true) {
                     await wixData
                         .insert(
-                            COLLECTIONS.ALERTAS_OPERATIVAS, {
+                            OPERATIONAL_COLLECTIONS.CONTROL_OPERATIVO, {
+                                controlType: CONTROL_TYPE.ALERT,
+                                dedupeKey: `ALERT:${traceId}:${comp._id || "na"}`,
                                 alertType: String(comp.kind || "").includes("FISCAL") ||
                                     String(comp.kind || "").includes("RESYNC") ?
                                     "FISCAL_RECOVERY_FAILED" :
@@ -260,7 +272,8 @@ export async function cleanExpiredDaysCache() {
     try {
         const now = new Date();
         const res = await wixData
-            .query(COLLECTIONS.AVAILABILITY_DAYS_CACHE)
+            .query(OPERATIONAL_COLLECTIONS.CONTROL_OPERATIVO)
+            .eq("controlType", CONTROL_TYPE.DAYS_CACHE)
             .lt("expiresAt", now)
             .limit(200)
             .find({ suppressAuth: true });
@@ -268,7 +281,7 @@ export async function cleanExpiredDaysCache() {
         let removed = 0;
         for (const item of res?.items || []) {
             await wixData
-                .remove(COLLECTIONS.AVAILABILITY_DAYS_CACHE, item._id, {
+                .remove(OPERATIONAL_COLLECTIONS.CONTROL_OPERATIVO, item._id, {
                     suppressAuth: true,
                 })
                 .catch(() => null);
@@ -317,11 +330,10 @@ export async function systemHealthCheck() {
         };
 
         const criticalCols = [
-            COLLECTIONS.CITAS_F2,
-            COLLECTIONS.MOVIMIENTOS_CAJA,
-            COLLECTIONS.SLOT_LOCKS,
-            COLLECTIONS.MAPA_STAFF,
-            COLLECTIONS.COMPENSACIONES_PENDIENTES,
+            BUSINESS_COLLECTIONS.CITAS_F2,
+            BUSINESS_COLLECTIONS.MOVIMIENTOS_CAJA,
+            BUSINESS_COLLECTIONS.MAPA_STAFF,
+            OPERATIONAL_COLLECTIONS.CONTROL_OPERATIVO,
         ];
 
         for (const col of criticalCols) {
@@ -352,11 +364,13 @@ export async function systemHealthCheck() {
         if (hasIssues) {
             await wixData
                 .insert(
-                    COLLECTIONS.ALERTAS_OPERATIVAS, {
+                    OPERATIONAL_COLLECTIONS.CONTROL_OPERATIVO, {
+                        controlType: CONTROL_TYPE.ALERT,
+                        dedupeKey: `ALERT:HEALTH:${traceId}`,
                         alertType: "HEALTH_CHECK_ISSUES",
                         severity: "WARNING",
                         message: "systemHealthCheck detected issues",
-                        status: "OPEN",
+                        status: CONTROL_STATUS.PENDING,
                         traceId,
                         _createdDate: new Date(),
                     }, { suppressAuth: true }

@@ -15,6 +15,7 @@ import {
     BOOKING_STATUS,
     BOOKING_TYPE,
     PAYMENT_STATUS,
+    normalizeBookingType,
 } from "backend/internalConfig";
 
 const log = logger;
@@ -93,7 +94,9 @@ export function assertCitasF2(item) {
     }
     assertValidEnum(normalizeBookingStatus(item.bookingStatus), BOOKING_STATUS, "bookingStatus");
     assertValidEnum(normalizePaymentStatus(item.paymentStatus), PAYMENT_STATUS, "paymentStatus");
-    assertValidEnum(item.bookingType, BOOKING_TYPE, "bookingType");
+    // BIBLIA 11.2: canonical enum is SIMPLE/DUALF1/DUALF2; legacy persisted
+    // values are resolved by the READ-ONLY normalizer (EOL 31/12/2026).
+    assertValidEnum(normalizeBookingType(item.bookingType), BOOKING_TYPE, "bookingType");
     if (!_nonEmpty(item.traceId)) {
         throw new Error("VALIDATION_ERROR: CitasF2 requires traceId (SSOT-12)");
     }

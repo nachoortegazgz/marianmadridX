@@ -8,7 +8,7 @@
  */
 
 import assert from 'assert';
-// FASE4-CONSOLIDADO: alineado al SSOT canonico v7 (nombres legacy COLLECTIONS/ESTADO_*
+// FASE4-CONSOLIDADO: alineado al SSOT canonico v7 (nombres legacy del umbrella/ESTADO_*
 // erradicados de internalConfig). Assertions equivalentes reescritas contra el contrato canonico.
 import {
   BUSINESS_COLLECTIONS,
@@ -210,7 +210,7 @@ export async function testAccountingEnums() {
  * Test UNIT-STRUCT-01: Colecciones SSOT definidas
  */
 export async function testCollectionsDefined() {
-  // FASE4: COLLECTIONS umbrella erradicado -> se auditan los grupos canonicos
+  // FASE4: alias umbrella erradicado -> se auditan los grupos canonicos
   const requiredBusiness = [
     'SERVICIOS_CATALOGO',
     'MAPA_STAFF',

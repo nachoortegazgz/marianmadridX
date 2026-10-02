@@ -22,7 +22,7 @@ FIXES APLICADOS v5009-FISCAL-V20.3:
              que BLOQUEA la creacion si el slot no cumple BIBLIA 2.2.1.
   - SAGA-04: Addons inyectados (addOnIds) en bookedEntity.slot de F1 y F2,
              con validacion de limite BIBLIA 3.2 (MAX_POR_RESERVA = 5).
-  - SAGA-05: PAYMENT_STATUS.UNPAID en confirmOrDecline (sin literales).
+  - SAGA-05: PAYMENT_STATUS.NOT_PAID en confirmOrDecline (sin literales).
   - SAGA-06: Compensacion NO cancela reservas CONFIRMED/CANCELLED/REFUNDED.
              Compara contra enum nativo Wix Y valor SSOT espanol (BIBLIA
              3.2.1: CONFIRMED -> CONFIRMADO, CANCELLED -> CANCELADO).
@@ -53,7 +53,9 @@ import { elevate } from "wix-auth";
 import wixData from "wix-data";
 
 import {
-    COLLECTIONS,
+    BUSINESS_COLLECTIONS,
+    OPERATIONAL_COLLECTIONS,
+    CONTROL_TYPE,
     CONCURRENCY,
     SDK_CONFIG,
     SLOT_SEARCH,
@@ -132,9 +134,10 @@ const LOCKTTLMS = Number(CONCURRENCY?.MS_TTL_MUTEX) || 300000;
 
 const HEARTBEATMS = Number(CONCURRENCY?.MS_LATIDO) || 15000;
 
-const CITASCOL = COLLECTIONS.CITAS_F2;
-const SERVICIOSCOL = COLLECTIONS.SERVICIOS_CATALOGO;
-const COMPENSACIONESCOL = COLLECTIONS.COMPENSACIONES_PENDIENTES;
+const CITASCOL = BUSINESS_COLLECTIONS.CITAS_F2;
+const SERVICIOSCOL = BUSINESS_COLLECTIONS.SERVICIOS_CATALOGO;
+// FASE4 (ADR-05): CompensacionesPendientes absorbida en ControlOperativo.
+const COMPENSACIONESCOL = OPERATIONAL_COLLECTIONS.CONTROL_OPERATIVO;
 
 // v5010.4 (FASE 2): clave V20 segun BIBLIA 3.2.1 f13; cascada legacy
 // eliminada (internalConfig ya no expone MAX_DUAL_GAP_MINUTES).
@@ -157,7 +160,7 @@ const MAX_ADDONS_PER_BOOKING = 5;
 const SKIP_AVAILABILITY_VALIDATION = false;
 
 // SAGA-05: SSOT = Wix native EN enums only (no ES cascade).
-const PAYMENT_STATUS_UNPAID = _safeTrim(PAYMENT_STATUS.NOT_PAID || PAYMENT_STATUS.UNPAID);
+const PAYMENT_STATUS_NOT_PAID = _safeTrim(PAYMENT_STATUS.NOT_PAID);
 const PAYMENT_STATUS_PENDING = _safeTrim(PAYMENT_STATUS.PENDING_PAYMENT);
 const BOOKING_STATUS_CONFIRMED = _safeTrim(BOOKING_STATUS.CONFIRMED);
 const BOOKING_STATUS_PENDING_PAYMENT = _safeTrim(
@@ -1398,7 +1401,7 @@ export async function executeBookingSaga(unsafePayload) {
 
         // =========================================================================
         // CHECKOUT ONLINE / CONFIRMACION PRESENCIAL
-        // SAGA-05: PAYMENT_STATUS.UNPAID (sin literales)
+        // SAGA-05: PAYMENT_STATUS.NOT_PAID (sin literales)
         // =========================================================================
         const paymentMethod = _safeTrim(
             unsafePayload?.paymentMethod || metaCita.paymentMethod || "PRESENCIAL"
@@ -1463,7 +1466,7 @@ export async function executeBookingSaga(unsafePayload) {
                                 () =>
                                 confirmOrDeclineBookingElevated(booking.bookingId, {
                                     // SAGA-05: constante SSOT, nunca literal.
-                                    paymentStatus: PAYMENT_STATUS_UNPAID,
+                                    paymentStatus: PAYMENT_STATUS_NOT_PAID,
                                 }),
                                 API_TIMEOUT_MS,
                                 "confirmOrDecline"
@@ -1498,7 +1501,7 @@ export async function executeBookingSaga(unsafePayload) {
 
         const paymentStatus = isOnline ?
             PAYMENT_STATUS_PENDING :
-            PAYMENT_STATUS_UNPAID;
+            PAYMENT_STATUS_NOT_PAID;
 
         const citaStatus = isOnline ?
             BOOKING_STATUS_PENDING_PAYMENT :

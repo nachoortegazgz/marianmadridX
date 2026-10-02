@@ -31,8 +31,8 @@ FIXES APLICADOS v5009-FISCAL-V20.2:
              determinista (no usar para correlacion dual).
   - CORE-06: confirmOrDeclineBookingElevated traduce paymentStatus del
              SSOT espanol (IMPAGADO, NO_PAGADO, PAGADO...) al enum nativo
-             de Wix (UNPAID, NOT_PAID, PAID...) segun BIBLIA 3.2.1.
-             Resuelve el riesgo SAGA-05: la saga envia PAYMENT_STATUS.UNPAID
+             de Wix (NOT_PAID, PAID...) segun BIBLIA 3.2.1.
+             Resuelve el riesgo SAGA-05: la saga envia PAYMENT_STATUS.NOT_PAID
              ("IMPAGADO") y Wix solo acepta el enum nativo ingles.
              Valores ingleses pasan sin cambios (back-compat total).
   - CORE-07: Constantes CONCURRENCY V20 canonicas (BIBLIA 3.2.1 filas
@@ -68,8 +68,12 @@ import wixData from "wix-data";
 import { getStaffScheduleId } from "backend/staff";
 import { logger } from "backend/logger";
 import {
-    COLLECTIONS,
+    BUSINESS_COLLECTIONS,
+    OPERATIONAL_COLLECTIONS,
+    CONTROL_TYPE,
     CONCURRENCY,
+    normalizeBookingType,
+    isDualBookingType,
     SDK_CONFIG,
     SLOT_SEARCH,
     API,
@@ -165,7 +169,6 @@ const WIX_NATIVE_PAYMENT_STATUS = Object.freeze({
     // Values already canonical EN (Wix Bookings). Identity pass-through.
     UNDEFINED: "UNDEFINED",
     NOT_PAID: "NOT_PAID",
-    UNPAID: "NOT_PAID",
     PENDING_PAYMENT: "PENDING_PAYMENT",
     PAID: "PAID",
     PARTIALLY_PAID: "PARTIALLY_PAID",
@@ -192,7 +195,7 @@ const _confirmOrDeclineElevatedRaw = elevate(bookings.confirmOrDeclineBooking);
 /**
  * CORE-06: Wrapper elevado que traduce el paymentStatus del SSOT (espanol)
  * al enum nativo que acepta Wix Bookings. bookingSaga v20.3 envia
- * PAYMENT_STATUS.UNPAID ("IMPAGADO"); sin esta traduccion Wix rechaza la
+ * PAYMENT_STATUS.NOT_PAID; sin esta traduccion Wix rechaza la
  * confirmacion presencial.
  *
  * Contrato preservado: (bookingId, options) -> respuesta nativa elevada.
@@ -473,7 +476,26 @@ const MUTEX_TTL_MS = Number(CONCURRENCY?.MS_TTL_MUTEX);
 if (!Number.isFinite(MUTEX_TTL_MS) || MUTEX_TTL_MS <= 0) {
     throw new Error("MS_TTL_MUTEX must be positive");
 }
-const LOCKS_COL = COLLECTIONS.SLOT_LOCKS;
+// FASE4 (ADR-05): SlotLocks absorbida en ControlOperativo (discriminador
+// controlType=SLOT_LOCK). Las escrituras purgan el payload de documento
+// fisico antiguo y persisten el esquema canonico de ControlOperativo.
+const LOCKS_COL = OPERATIONAL_COLLECTIONS.CONTROL_OPERATIVO;
+
+export function _buildSlotLockControl(slotClave, lockOwnerId, ttlMs, existing) {
+    const now = new Date();
+    return {
+        _id: _safeLockId(slotClave),
+        controlType: CONTROL_TYPE.SLOT_LOCK,
+        dedupeKey: String(slotClave),
+        slotKey: String(slotClave),
+        lockOwnerId: String(lockOwnerId || makeTraceId("lock")),
+        status: "ACTIVE",
+        traceId: String(lockOwnerId || ""),
+        expiresAt: new Date(Date.now() + (Number(ttlMs) || MUTEX_TTL_MS)),
+        _createdDate: existing?._createdDate ? _toDateSafe(existing._createdDate) || now : now,
+        _updatedDate: now,
+    };
+}
 
 export function _safeLockId(key) {
     const k = String(key || "").trim();
@@ -503,16 +525,8 @@ function _isDuplicateItemError(error) {
 }
 
 function _buildLockDocument(slotClave, lockOwnerId, ttlMs, existing) {
-    const now = new Date();
-    return {
-        ...(existing || {}),
-        _id: _safeLockId(slotClave),
-        slotKey: String(slotClave),
-        lockOwnerId: String(lockOwnerId || makeTraceId("lock")),
-        expiresAt: new Date(Date.now() + (Number(ttlMs) || MUTEX_TTL_MS)),
-        _createdDate: existing?._createdDate ? _toDateSafe(existing._createdDate) || now : now,
-        _updatedDate: now,
-    };
+    // FASE4: delegacion al constructor canonico ControlOperativo/SLOT_LOCK.
+    return _buildSlotLockControl(slotClave, lockOwnerId, ttlMs, existing);
 }
 
 export async function _lockSlotKeyOrFail(slotClave, lockOwnerId, ttlMs) {
@@ -604,7 +618,9 @@ export function _buildLockKeys(phases, resourceId) {
 // BLOQUE 10 - TRANSACCIONES IDEMPOTENTES (BookingTransactions) - CORE-07
 // =============================================================================
 
-const TRANSACTIONS_COL = COLLECTIONS.BOOKING_TRANSACTIONS;
+// FASE4 (ADR-05): BookingTransactions absorbida en ControlOperativo
+// (controlType=BOOKING_TX).
+const TRANSACTIONS_COL = OPERATIONAL_COLLECTIONS.CONTROL_OPERATIVO;
 
 // CORE-07: tolerancia al renombrado V20 (BIBLIA 3.2.1).
 // SIN EQUIVALENTE V20 DOCUMENTADO en BIBLIA 3.2.1 para estas dos claves
@@ -716,7 +732,7 @@ export async function _failTransaction(pairToken, errorMessage) {
 // BLOQUE 11 - PERSISTENCIA EN CITAS_F2 (CORE-07: alias de estado)
 // =============================================================================
 
-const CITAS_COL = COLLECTIONS.CITAS_F2;
+const CITAS_COL = BUSINESS_COLLECTIONS.CITAS_F2;
 
 // CORE-07: statuses use SSOT EN = Wix native. No dual alias lists.
 export async function _persistBooking(params, traceId) {
@@ -759,8 +775,7 @@ export async function _persistBooking(params, traceId) {
         p.bookingStatus ||
         (
             metaPago === String(PAYMENT_STATUS.PENDING_PAYMENT).toUpperCase() ||
-            metaPago === String(PAYMENT_STATUS.NOT_PAID).toUpperCase() ||
-            metaPago === "UNPAID"
+            metaPago === String(PAYMENT_STATUS.NOT_PAID).toUpperCase()
                 ? BOOKING_STATUS.PENDING
                 : BOOKING_STATUS.CONFIRMED
         )
@@ -785,7 +800,7 @@ export async function _persistBooking(params, traceId) {
         startDate: startDateObj,
         endDate: endDateObj,
         dateYmd,
-        bookingType: p.tipo || p.bookingType || "simple",
+        bookingType: normalizeBookingType(p.tipo || p.bookingType),
         status: statusCita,
         paymentStatus: metaPago,
         meta: normalizedMeta,
@@ -795,8 +810,7 @@ export async function _persistBooking(params, traceId) {
         _updatedDate: now,
     };
 
-    const normalizedBookingType = String(doc.bookingType || "simple").toLowerCase();
-    if (["dual", "linked", "multi_phase", "dual_f1", "dual_f2"].includes(normalizedBookingType) && !doc.pairToken) {
+    if (isDualBookingType(doc.bookingType) && !doc.pairToken) {
         throw new Error("Missing pairToken for linked booking");
     }
 
