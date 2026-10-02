@@ -66,6 +66,7 @@ import {
     COMPENSATION_KIND,
     COMPENSATION_STATUS,
     APP_IDS,
+    BOOKING_FIELDS,
 } from "backend/internalConfig";
 
 import {
@@ -322,7 +323,9 @@ async function _compensateCreatedBookings(createdBookings, traceId) {
         const bookingId = booking?.bookingId || booking?.id;
         if (!bookingId) continue;
 
-        const status = _safeTrim(booking?.status).toUpperCase();
+        // FASE2 (ADR-06): lectura canonica bookingStatus PRIMERO; el legado
+        // "status" queda como fallback de LECTURA transitorio (EOL 31/12/2026).
+        const status = _safeTrim(booking?.[BOOKING_FIELDS.STATUS] || booking?.status).toUpperCase();
 
         // SAGA-06: nunca cancelar una reserva ya confirmada, cancelada o
         // reembolsada. Cancelar un CONFIRMED genera descuadre fiscal y de caja.
@@ -1484,8 +1487,12 @@ export async function executeBookingSaga(unsafePayload) {
                         // SAGA-06: tras confirmar, el booking pasa a CONFIRMED y ya
                         // no es cancelable. Se actualiza el estado local para que la
                         // compensacion posterior lo respete.
-                        booking.status =
+                        // FASE2 (ADR-06): se escribe en bookingStatus (canonico);
+                        // el setter legado "status" queda eliminado del objeto local.
+                        booking.bookingStatus =
+                            _safeTrim(confirmResult?.booking?.bookingStatus) ||
                             _safeTrim(confirmResult?.booking?.status) ||
+                            _safeTrim(confirmResult?.bookingStatus) ||
                             _safeTrim(confirmResult?.status) ||
                             BOOKING_STATUS_CONFIRMED;
                     }

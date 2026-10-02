@@ -132,6 +132,54 @@ export const CONTROL_STATUS = Object.freeze({
     CANCELLED: "CANCELLED",
 });
 
+// FASE4-INV (SSOT 13.1): enum canónico de movimientos de inventario
+// (MovimientosInventario). Distinto de MOVEMENT_TYPE, que gobierna los
+// movimientos de caja (MovimientosCaja). magnitude deriva del signo de
+// quantityDelta: ENTRADA/AJUSTE_POSITIVO -> +1, SALIDA/MERMA -> -1.
+export const INVENTORY_MOVEMENT_TYPE = Object.freeze({
+    ENTRADA: "ENTRADA",
+    SALIDA: "SALIDA",
+    DEVOLUCION: "DEVOLUCION",
+    MERMA: "MERMA",
+    AJUSTE_POSITIVO: "AJUSTE_POSITIVO",
+    AJUSTE_NEGATIVO: "AJUSTE_NEGATIVO",
+    TRASLADO_ENTRADA: "TRASLADO_ENTRADA",
+    TRASLADO_SALIDA: "TRASLADO_SALIDA",
+});
+
+export const MAGNITUDE = Object.freeze({
+    POSITIVE: 1,
+    NEGATIVE: -1,
+    NEUTRAL: 0,
+});
+
+// FASE4-INV (ADR-09): alias funcionales en productores de inventario.
+// ONLINE_SALE es el token historico de las ventas online (pedido Wix) y
+// se normaliza a SALIDA; COMPRA/VENTA manuales se normalizan a
+// ENTRADA/SALIDA. La normalizacion ocurre SOLO en validation.js
+// (adaptador de lectura, EOL 31/12/2026); las escrituras nuevas deben
+// usar INVENTORY_MOVEMENT_TYPE directamente.
+export const INVENTORY_MOVEMENT_ALIAS = Object.freeze({
+    ONLINE_SALE: "SALIDA",
+    VENTA_ONLINE: "SALIDA",
+});
+
+// Tipos cuyo quantityDelta debe ser negativo en MovimientosInventario
+export const NEGATIVE_INVENTORY_MOVEMENT_TYPES = Object.freeze([
+    INVENTORY_MOVEMENT_TYPE.SALIDA,
+    INVENTORY_MOVEMENT_TYPE.MERMA,
+    INVENTORY_MOVEMENT_TYPE.AJUSTE_NEGATIVO,
+    INVENTORY_MOVEMENT_TYPE.TRASLADO_SALIDA,
+]);
+
+// Tipos cuyo quantityDelta debe ser positivo en MovimientosInventario
+export const POSITIVE_INVENTORY_MOVEMENT_TYPES = Object.freeze([
+    INVENTORY_MOVEMENT_TYPE.ENTRADA,
+    INVENTORY_MOVEMENT_TYPE.DEVOLUCION,
+    INVENTORY_MOVEMENT_TYPE.AJUSTE_POSITIVO,
+    INVENTORY_MOVEMENT_TYPE.TRASLADO_ENTRADA,
+]);
+
 // FASE3 (MATRIZ H.5 / SSOT-01): alias umbrella heredado ERRADICADO.
 // Los consumidores usan BUSINESS_COLLECTIONS / OPERATIONAL_COLLECTIONS /
 // RESERVED_COLLECTIONS / HISTORICAL_COLLECTIONS explicitamente. Las escrituras
