@@ -303,7 +303,19 @@ export async function getQuarterlyTaxSummaryInternal(year, quarter, options = {}
   const state = _initTaxAccumulator(months);
   _accumulatePage(fetchResult.items, state);
 
-  const nifEmisor = await _getBusinessTaxId(traceId).catch(() => "BXXXXXXXX");
+  // SSOT v20.1: un resumen fiscal no puede publicarse con un NIF ficticio.
+  // El fallback legacy "BXXXXXXXX" queda ERRADICADO; si falta la configuracion
+  // fiscal real, el agregador falla de forma explicita (FISCAL_CONFIG_MISSING).
+  let nifEmisor;
+  try {
+    nifEmisor = await _getBusinessTaxId(traceId);
+  } catch (err) {
+    return {
+      status: "ERROR",
+      data: null,
+      error: _toPublicError(err, "FISCAL_CONFIG_MISSING"),
+    };
+  }
 
   return {
     status: "SUCCESS",
@@ -477,10 +489,11 @@ async function _getBusinessTaxId(traceId) {
       log.warn("_getBusinessTaxId read legacy taxId field; migrate to nifProductor before EOL", { traceId });
       return transitional.toUpperCase();
     }
-    return "BXXXXXXXX";
+    // SSOT v20.1: sin NIF real no se produce resumen fiscal valido.
+    throw new Error("FISCAL_CONFIG_MISSING");
   } catch (err) {
-    log.warn("_getBusinessTaxId failed", { traceId, error: err?.message });
-    return "BXXXXXXXX";
+    log.error("_getBusinessTaxId failed", { traceId, error: err?.message });
+    throw err;
   }
 }
 

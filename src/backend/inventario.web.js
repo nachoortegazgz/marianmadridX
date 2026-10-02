@@ -97,14 +97,34 @@ export const getInventoryDashboard = webMethod(Permissions.SiteMember, async (op
 
     const items = res?.items || [];
 
-    const totalStock = items.reduce((sum, item) => sum + Number(item.stockExpected || 0), 0);
-    const lowStockItems = items.filter((item) => Number(item.stockExpected || 0) <= Number(item.lowStockAlert || 5));
+    // SSOT v20.1: campos canonicos de stock (stockOnHand / stockReserved /
+    // stockAvailable). "stockExpected" queda solo como lectura historica de
+    // respaldo; ninguna escritura nueva usa ese campo.
+    const _stockValue = (item) => {
+        const onHand = Number(item.stockOnHand);
+        if (Number.isFinite(onHand)) return onHand;
+        return Number(item.stockExpected || 0);
+    };
+
+    const totalStock = items.reduce((sum, item) => sum + _stockValue(item), 0);
+    const lowStockItems = items.filter((item) => _stockValue(item) <= Number(item.lowStockAlert || 5));
     const needsReconciliation = items.filter((item) => item.needsWixReconciliation === true);
+
+    // DTO publico proyectado: no se devuelven documentos CMS crudos.
+    const publicItems = items.map((item) => ({
+        sku: item.sku,
+        productName: item.productName,
+        stockOnHand: Number(item.stockOnHand) || 0,
+        stockReserved: Number(item.stockReserved) || 0,
+        stockAvailable: Number(item.stockAvailable) || 0,
+        lowStock: _stockValue(item) <= Number(item.lowStockAlert || 5),
+        needsWixReconciliation: item.needsWixReconciliation === true,
+    }));
 
     return {
       status: "SUCCESS",
       data: {
-        items,
+        items: publicItems,
         totalItems: items.length,
         totalStock,
         lowStockCount: lowStockItems.length,
@@ -187,8 +207,16 @@ export async function recordInventoryMovementSafe(sku, movementType, quantity, m
     return { status: "ERROR", data: null, error: { code: "SKU_NOT_FOUND", message: `SKU ${cleanSku} no encontrado en inventario` } };
   }
 
-  const stockBefore = Number(stockItem.stockExpected || 0);
-  const stockAfter = stockBefore + qty;
+  // SSOT v20.1: escritura canonica sobre stockOnHand/stockReserved/stockAvailable.
+  // "stockExpected" solo se lee como respaldo historico, nunca se escribe.
+  const stockOnHand = Number(
+    Number.isFinite(Number(stockItem.stockOnHand))
+      ? Number(stockItem.stockOnHand)
+      : Number(stockItem.stockExpected || 0)
+  );
+  const stockReserved = Number(stockItem.stockReserved) || 0;
+  const stockBefore = stockOnHand;
+  const stockAfter = stockOnHand + qty;
 
   if (stockAfter < 0 && !meta.allowNegativeStock) {
     return { status: "ERROR", data: null, error: { code: "NEGATIVE_STOCK", message: `Stock resultante seria ${stockAfter}. Stock actual: ${stockBefore}` } };
@@ -223,7 +251,8 @@ export async function recordInventoryMovementSafe(sku, movementType, quantity, m
 
   const savedMovement = await wixData.insert(MOVIMIENTOS_INV_COL, movement, { suppressAuth: true });
 
-  stockItem.stockExpected = stockAfter;
+  stockItem.stockOnHand = stockAfter;
+  stockItem.stockAvailable = stockAfter - stockReserved;
   stockItem.lastInventoryMovementAt = new Date();
   stockItem.lastInventoryMovementId = savedMovement._id;
   if (meta.requiresWixReconciliation) {
@@ -329,6 +358,23 @@ export async function recordOnlineInventoryRefundInternal(order, refundObj, rest
 
 export const generateInventoryClosing = webMethod(Permissions.Admin, async (options = {}) => {
   const traceId = options?.traceId || makeTraceId("inv-close");
+  // SSOT v20.1 / ADR-02: el cierre de inventario NO debe escribirse en
+  // HistoricoCierresZ (mezcla dominio de caja con dominio de inventario).
+  // No existe aun decision aprobada sobre el destino (InventarioStockVentaCierre,
+  // recordType dentro de HistoricoCierresZ, o coleccion nueva), por lo que el
+  // flujo queda BLOQUEADO hasta verificar la coleccion destino. El codigo de
+  // proyeccion/valoracion se conserva debajo para reactivarlo cuando exista
+  // evidencia de esquema (no alcanzable mientras devuelva early-return).
+  log.warn("generateInventoryClosing blocked: destination collection unverified", { traceId });
+  return {
+    status: "ERROR",
+    data: null,
+    error: {
+      code: "INVENTORY_CLOSING_SCHEMA_UNVERIFIED",
+      message: "El cierre de inventario esta bloqueado hasta verificar su coleccion destino.",
+    },
+  };
+  // eslint-disable-next-line no-unreachable
   try {
     await requireAdmin(traceId);
 
@@ -384,7 +430,11 @@ export const generateInventoryClosing = webMethod(Permissions.Admin, async (opti
 
     for (const item of stockItems) {
       const sku = _safeTrim(item.sku);
-      const stockQuantity = Number(item.stockExpected) || 0;
+      const stockQuantity = Number(
+        Number.isFinite(Number(item.stockOnHand))
+          ? Number(item.stockOnHand)
+          : Number(item.stockExpected || 0)
+      );
       const unitCost = Number(item.costExTax) || 0;
       const stockValue = _roundMoney(stockQuantity * unitCost);
       totalStockValue += stockValue;

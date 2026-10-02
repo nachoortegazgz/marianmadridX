@@ -604,7 +604,10 @@ async function _proyectarAsientoContable(cabecera, traceId) {
     try {
         const { projectLedgerMovementToAccounting } = await import("backend/contabilidad");
         const res = await projectLedgerMovementToAccounting(cabecera);
-        if (res?.status !== "SUCCESS" && res?.status !== "SKIPPED") {
+        // PROJECTED: proyeccion firmada devuelta sin persistencia (el destino
+        // contable aprobado aun no esta verificado; ver contabilidad.js). No es
+        // un error de proyeccion y no debe lanzarse como tal.
+        if (res?.status !== "SUCCESS" && res?.status !== "SKIPPED" && res?.status !== "PROJECTED") {
             throw new Error(`contabilidad.js: ${res?.status || "UNKNOWN"}`);
         }
     } catch (err) {
