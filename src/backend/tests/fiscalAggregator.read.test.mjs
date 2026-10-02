@@ -11,7 +11,8 @@ import test from 'node:test';
 import assert from 'node:assert';
 
 const { wixDataMock } = await import('./loader.mjs');
-const FA = await import('backend/fiscalAggregator.web');
+// ADR-06 Etapa A: convencion unica backend/<modulo>.web.js (incl. tests)
+const FA = await import('backend/fiscalAggregator.web.js');
 const IC = await import('backend/internalConfig');
 const loggerMod = await import('backend/logger');
 

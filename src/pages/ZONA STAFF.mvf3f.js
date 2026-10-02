@@ -21,7 +21,7 @@ import {
   withTimeout,
 } from "public/mmUtils";
 import { createWidgetBridge } from "public/widgetBridge";
-import { checkStaffCollaboratorAccess } from "backend/security.web";
+import { checkStaffCollaboratorAccess } from "backend/security.web.js";
 
 let bridge = null;
 let isAuthorized = false;

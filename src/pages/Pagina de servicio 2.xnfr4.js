@@ -6,7 +6,7 @@ VERSION: v5011-SERVICE-CATALOG-CANONICAL
 */
 
 import wixLocation from "wix-location-frontend";
-import { getServiceBySlugOrId } from "backend/reservas.web";
+import { getServiceBySlugOrId } from "backend/reservas.web.js";
 import {
   MESSAGE_TYPES,
   URLS,

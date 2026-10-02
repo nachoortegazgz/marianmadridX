@@ -12,8 +12,9 @@ import test from 'node:test';
 import assert from 'node:assert';
 
 const { wixDataMock } = await import('./loader.mjs');
-const RW = await import('backend/reservas.web');
-const CW = await import('backend/cajas.web');
+// ADR-06 Etapa A: convencion unica backend/<modulo>.web.js (incl. tests)
+const RW = await import('backend/reservas.web.js');
+const CW = await import('backend/cajas.web.js');
 const IC = await import('backend/internalConfig');
 
 const FORBIDDEN_KEYS = [
@@ -88,7 +89,7 @@ test('DTO-03 non-displayable booking states are hidden', async () => {
 
 test('DTO-04 getMovimientoByBooking exposes only receipt-safe fields', async () => {
   wixDataMock._reset();
-  const mod = await import('backend/cajas.web');
+  const mod = await import('backend/cajas.web.js');
   // canonical serialized linkedBookingIds produced by _linkedBookingValue([id])
   const seed = [{
     _id: 'm1',

@@ -623,7 +623,7 @@ async function _proyectarFacturaRecibida(cabecera, traceId) {
 
 async function _proyectarMovimientoInventario(cabecera, traceId) {
     try {
-        const mod = await import("backend/inventario.web");
+        const mod = await import("backend/inventario.web.js");
         const fn = mod?.recordInventoryMovementSafe;
         if (typeof fn !== "function") {
             log.warn("inventario.recordInventoryMovementSafe no disponible", { traceId });

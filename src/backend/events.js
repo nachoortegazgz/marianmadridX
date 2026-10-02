@@ -60,12 +60,12 @@ import {
 import { SECRETS } from "backend/mmSecrets";
 import { logger } from "backend/logger";
 import { normalizeError, _updateCitaSafe } from "backend/booking/bookingCore";
-import { queueFiscalRecovery } from "backend/cajas.web";
+import { queueFiscalRecovery } from "backend/cajas.web.js";
 import { registrarEventoEconomico } from "backend/eventLog";
 import {
     recordOnlineInventoryOrderInternal,
     recordOnlineInventoryRefundInternal,
-} from "backend/inventario.web";
+} from "backend/inventario.web.js";
 
 import { logAuditEventWithTimeout } from "backend/audit";
 

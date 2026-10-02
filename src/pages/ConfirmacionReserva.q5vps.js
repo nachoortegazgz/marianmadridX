@@ -25,7 +25,7 @@ STANDARDS: G10 ASCII Strict (sin acentos en codigo).
 // FASE4: import wixData retirado (SSOT-07 / frontend minimo): esta pagina no
 // accede directamente al CMS; toda lectura pasa por webMethods (reservas.web,
 // cajas.web). El contrato de pagina no cambio.
-import wixWindow from 'wix-window';
+import wixWindow from 'wix-window-frontend';
 
 // Web functions reales reemitidas en FASE7 v5010.1 (anteriormente el riesgo
 // MEDIO consistia en importar funciones inexistentes; ahora existen ambas):

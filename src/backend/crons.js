@@ -26,7 +26,7 @@ import {
 } from "backend/internalConfig";
 import { makeTraceId, _safeTrim, _looksLikeGuid, withTimeout } from "public/mmUtils";
 import { logger } from "backend/logger";
-import { verifyFiscalHashChainIntegrity } from "backend/cajas.web";
+import { verifyFiscalHashChainIntegrity } from "backend/cajas.web.js";
 // [SSOT-v5010.1 ZOMB-02] backend/bookingServiceSync.js ELIMINADO. La cola BookingsServiceSyncQueue
 // se procesa via el modulo nativo de sincronizacion de servicios; no hay consumidor custom.
 import { cancelBookingElevated } from "backend/booking/bookingCore";
@@ -132,7 +132,7 @@ async function _runOneCompensation(comp, traceId) {
 
     if (kind === "FISCAL_LEDGER" || kind === "RESYNC_LEDGER_ACCOUNTING") {
         try {
-            const { registerBookingPayment } = await import("backend/cajas.web");
+            const { registerBookingPayment } = await import("backend/cajas.web.js");
             // v5010.7 SSOT: CompensacionesPendientes usa campo canonic totalAmount.
             const amount = Number(comp?.totalAmount);
             const hasAmount = Number.isFinite(amount) && amount !== 0;
