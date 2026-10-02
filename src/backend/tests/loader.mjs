@@ -26,7 +26,17 @@ export const wixDataMock = {
   _store: new Map(),          // collectionName -> array of items
   _calls: [],                 // audit trail of operations
   _seed(collection, items) {
-    this._store.set(collection, JSON.parse(JSON.stringify(items)));
+    // JSON round-trip would serialize Date instances to ISO strings and
+    // break date comparisons in queries (.lt/_createdDate). Revive ISO
+    // strings back into Date objects so seeded rows match live Velo types.
+    const revived = JSON.parse(JSON.stringify(items), (key, value) => {
+      if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/.test(value)) {
+        const d = new Date(value);
+        return Number.isNaN(d.getTime()) ? value : d;
+      }
+      return value;
+    });
+    this._store.set(collection, revived);
   },
   _reset() {
     this._store.clear();
@@ -36,38 +46,47 @@ export const wixDataMock = {
     const rows = () => this._store.get(collection) || [];
     const state = { filters: [], limitN: 30 };
     const cmpValue = (v) => (v instanceof Date ? v.getTime() : v);
-    const q = {
-      eq(field, value) { state.filters.push([field, value]); return q; },
-      in(field, values) { state.filters.push([field, values]); return q; },
-      ne(field, value) { state.filters.push(['!=', field, value]); return q; },
-      lt(field, value) { state.filters.push(['<', field, value]); return q; },
-      gt(field, value) { state.filters.push(['>', field, value]); return q; },
-      le(field, value) { state.filters.push(['<=', field, value]); return q; },
-      ge(field, value) { state.filters.push(['>=', field, value]); return q; },
-      between(field, low, high) { state.filters.push(['range', field, low, high]); return q; },
-      contains(field, value) { state.filters.push(['has', field, value]); return q; },
-      hasSome(field, values) { state.filters.push(['some', field, values]); return q; },
-      ascending() { return q; },
-      descending() { return q; },
-      limit(n) { state.limitN = n; return q; },
-      find: async () => {
-        this._calls.push({ op: 'query', collection });
-        let items = rows().slice();
-        for (const f of state.filters) {
-          if (f[0] === '!=') { items = items.filter((it) => it[f[1]] !== f[2]); }
-          else if (f[0] === '<') { items = items.filter((it) => cmpValue(it[f[1]]) < cmpValue(f[2])); }
-          else if (f[0] === '>') { items = items.filter((it) => cmpValue(it[f[1]]) > cmpValue(f[2])); }
-          else if (f[0] === '<=') { items = items.filter((it) => cmpValue(it[f[1]]) <= cmpValue(f[2])); }
-          else if (f[0] === '>=') { items = items.filter((it) => cmpValue(it[f[1]]) >= cmpValue(f[2])); }
-          else if (f[0] === 'range') { items = items.filter((it) => cmpValue(it[f[1]]) >= cmpValue(f[2]) && cmpValue(it[f[1]]) <= cmpValue(f[3])); }
-          else if (f[0] === 'has') { items = items.filter((it) => Array.isArray(it[f[1]]) && it[f[1]].includes(f[2])); }
-          else if (f[0] === 'some') { items = items.filter((it) => Array.isArray(it[f[1]]) && it[f[1]].some((v) => f[2].includes(v))); }
-          else if (Array.isArray(f[1])) { items = items.filter((it) => f[1].includes(it[f[0]])); }
-          else { items = items.filter((it) => it[f[0]] === f[1]); }
-        }
-        items = items.slice(0, state.limitN);
-        return { items, total: items.length };
-      },
+    // Real Velo semantics: filter methods (eq/in/lt...) return the same
+    // WixDataQuery, so .eq(...).limit(1).count() chains legally. The mock
+    // mirrors that by returning `q` from every builder method.
+    const q = {};
+    q.eq = (field, value) => { state.filters.push([field, value]); return q; };
+    q.in = (field, values) => { state.filters.push([field, values]); return q; };
+    q.ne = (field, value) => { state.filters.push(['!=', field, value]); return q; };
+    q.lt = (field, value) => { state.filters.push(['<', field, value]); return q; };
+    q.gt = (field, value) => { state.filters.push(['>', field, value]); return q; };
+    q.le = (field, value) => { state.filters.push(['<=', field, value]); return q; };
+    q.ge = (field, value) => { state.filters.push(['>=', field, value]); return q; };
+    q.between = (field, low, high) => { state.filters.push(['range', field, low, high]); return q; };
+    q.contains = (field, value) => { state.filters.push(['has', field, value]); return q; };
+    q.hasSome = (field, values) => { state.filters.push(['some', field, values]); return q; };
+    q.ascending = () => q;
+    q.descending = () => q;
+    q.limit = (n) => { state.limitN = n; return q; };
+    const applyFilters = () => {
+      let items = rows().slice();
+      for (const f of state.filters) {
+        if (f[0] === '!=') { items = items.filter((it) => it[f[1]] !== f[2]); }
+        else if (f[0] === '<') { items = items.filter((it) => cmpValue(it[f[1]]) < cmpValue(f[2])); }
+        else if (f[0] === '>') { items = items.filter((it) => cmpValue(it[f[1]]) > cmpValue(f[2])); }
+        else if (f[0] === '<=') { items = items.filter((it) => cmpValue(it[f[1]]) <= cmpValue(f[2])); }
+        else if (f[0] === '>=') { items = items.filter((it) => cmpValue(it[f[1]]) >= cmpValue(f[2])); }
+        else if (f[0] === 'range') { items = items.filter((it) => cmpValue(it[f[1]]) >= cmpValue(f[2]) && cmpValue(it[f[1]]) <= cmpValue(f[3])); }
+        else if (f[0] === 'has') { items = items.filter((it) => Array.isArray(it[f[1]]) && it[f[1]].includes(f[2])); }
+        else if (f[0] === 'some') { items = items.filter((it) => Array.isArray(it[f[1]]) && it[f[1]].some((v) => f[2].includes(v))); }
+        else if (Array.isArray(f[1])) { items = items.filter((it) => f[1].includes(it[f[0]])); }
+        else { items = items.filter((it) => it[f[0]] === f[1]); }
+      }
+      return items;
+    };
+    q.count = async () => {
+      this._calls.push({ op: 'query', collection });
+      return applyFilters().length;
+    };
+    q.find = async () => {
+      this._calls.push({ op: 'query', collection });
+      const items = applyFilters().slice(0, state.limitN);
+      return { items, total: items.length };
     };
     return q;
   },
@@ -93,6 +112,12 @@ export const wixDataMock = {
   },
   remove: async (collection, item) => {
     wixDataMock._calls.push({ op: 'remove', collection });
+    // Real Velo semantics: remove() deletes the row (accepts _id or object).
+    // Purge crons (cleanAuditLogs et al.) assert against store state after
+    // running, so the mock must actually mutate it.
+    const id = (item && typeof item === 'object') ? item._id : item;
+    const rows = wixDataMock._store.get(collection) || [];
+    wixDataMock._store.set(collection, rows.filter((r) => r._id !== id));
     return item;
   },
 };

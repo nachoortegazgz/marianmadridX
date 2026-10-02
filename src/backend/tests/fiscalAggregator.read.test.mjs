@@ -96,10 +96,15 @@ test('TAXID-02 legacy EMISOR adapter returns taxId with warn when no config row'
   }
 });
 
-test('TAXID-03 safe placeholder when nothing found', async () => {
+test('TAXID-03 throws FISCAL_CONFIG_MISSING when nothing found (SSOT v20.1: placeholder BXXXXXXXX ERRADICADO)', async () => {
   wixDataMock._reset();
-  const id = await T.getBusinessTaxId('trace-taxid-3');
-  assert.strictEqual(id, 'BXXXXXXXX');
+  // Decision documentada (docs/adr/ADR-08-fiscal-taxid-throw.md): sin NIF real
+  // no se publica resumen fiscal -> _getBusinessTaxId LANZA, no devuelve
+  // placeholder. El fallback "BXXXXXXXX" quedo erradicado en v20.1.
+  await assert.rejects(
+    () => T.getBusinessTaxId('trace-taxid-3'),
+    /FISCAL_CONFIG_MISSING/
+  );
 });
 
 test('DEDUPE-01 prepareScheduledManagerPackages removed from aggregator', () => {

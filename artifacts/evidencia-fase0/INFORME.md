@@ -12,7 +12,7 @@
 |---|---|
 | Clonación | Ya presente en `/workspace` (repo git inicializado con el código actual del usuario). No se re-clonó para no duplicar estado. |
 | `npm install` | **No ejecutable en este entorno**: no hay acceso a registry/network disponible y el harness de tests (`src/backend/tests/loader.mjs`) está diseñado deliberadamente para correr **sin `node_modules`** (mocks offline de todos los módulos `wix-*`). Se documenta como limitación de entorno, no como fallo del sistema. |
-| Suite de tests (harness offline) | `node --experimental-loader ./loader.mjs --test` → **52/52 PASS, 0 FAIL** (ejecutado en vivo en esta sesión). El archivo histórico `baseline-tests.txt` registraba 3 fallos DTO (DTO-02/04/05) que ya están verdes en HEAD actual. |
+| Suite de tests (harness offline) | `node --experimental-loader ./loader.mjs --test` → **52/52 PASS, 0 FAIL** (histórico). Actualización plan de corrección 2026-10-02: suite ampliada a **57/57 PASS, 0 FAIL** con la nueva suite `crons.jobsConfigParity.test.mjs` (CRON-PARITY-01/02, CRON-Z-01~03, CRON-AUDIT-01~03), más runners auxiliares 10/10 y 1/1. El archivo histórico `baseline-tests.txt` registraba 3 fallos DTO (DTO-02/04/05) que ya están verdes en HEAD actual. |
 | `node --check` | Verde en los 33 archivos `.js` de `src/backend/*.js` y `src/backend/booking/*.js` (0 errores de sintaxis). |
 | Tag `pre-ssot-migracion-fase0` | **NO creado**: el repo es un snapshot grafted (historial truncado); la política de rollback queda cubierta por el commit base visible `717be39`. Pendiente de crear cuando haya credenciales de remote. |
 | `artifacts/evidencia-fase0/` | Existe; contiene `baseline-tests.txt`, `greps-baseline.txt` (histórico) y `greps-renovadas-20261002.txt` (salidas literales de esta sesión). |
@@ -25,7 +25,7 @@
 Verificaciones condicionales derivadas del análisis de código (a confirmar con CSV):
 - `CitasF2`: el campo canónico en uso es **`bookingStatus`** (hooks `CitasF2_beforeInsert/Update` en `data.js:854+` y normalizadores read-only en `validation.js`). No se detectó lectura de `status` como alias activo fuera de proyecciones DTO. ADR propuesto si el CSV muestra filas con `status`: programar renombrado antes de EOL.
 - `MovimientosCaja`: lecturas fiscales en `fiscalAggregator.web.js` ya son **AEAT-first con fallback legacy + warning** (`_readTaxRate` lee `tipoImpositivo` primero; logra `legacy-read taxRate`).
-- Valores legacy persistidos observados en normalizadores de solo-lectura: `CONFIRMADO→CONFIRMED`, `PAGADO→PAID` (visible en el log WARN de la suite `data.hooks.test.mjs`), `NORMAL→SIMPLE`, `DUAL→DUALF1/DUAL_F2` vía `normalizeBookingType` (`internalConfig.js:970-979`).
+- Valores legacy persistidos observados en normalizadores de solo-lectura: `CONFIRMADO→CONFIRMED`, `PAGADO→PAID` (visible en el log WARN de la suite `data.hooks.test.mjs`), `NORMAL→SIMPLE`, `DUAL→DUALF1` y `DUAL_F2→DUALF2` vía `normalizeBookingType` (`internalConfig.js:1020-1028`; DUALF1/DUALF2 canónicos).
 
 ## 3. Greps de evidencia (salidas literales en `greps-renovadas-20261002.txt`)
 
@@ -95,7 +95,7 @@ grep -rn "wix-data" src/pages src/public --include="*.js" → 0 resultados ✔
 | Tarea del plan | Estado |
 |---|---|
 | Clone + npm install | Parcial: repo presente; install no viable sin red (harness offline compensa) |
-| npm test + node --check | ✅ 52/52 tests verdes; node --check 33/33 archivos |
+| npm test + node --check | ✅ 57/57 tests verdes (re-ejecucion 2026-10-02, post plan de correccion; historico: 52/52); node --check 33/33 archivos |
 | Tag pre-ssot-migracion-fase0 | ⚠️ No creado (repo grafted, sin credenciales remote) |
 | Export CSV Wix Studio | ❌ Imposible en este entorno — documentado (§2); bloqueante para escrituras destructivas de FASE 4+/retiros |
 | Greps de evidencia archivados | ✅ `greps-renovadas-20261002.txt` + `greps-baseline.txt` |
