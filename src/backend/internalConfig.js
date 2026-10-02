@@ -70,6 +70,8 @@ export const RECORD_TYPE = Object.freeze({
 // FASE2: legacy umbrella alias COLLECTIONS ERADICATED (MATRIZ H.5 / BIBLIA 6).
 // Consumers must use BUSINESS_COLLECTIONS / OPERATIONAL_COLLECTIONS /
 // RESERVED_COLLECTIONS / HISTORICAL_COLLECTIONS explicitly.
+// v5011.1 HOTFIX: el derivado COLLECTIONS se define DESPUES de CONTROL_TYPE
+// (mas abajo en este bloque) para evitar TDZ; ver comentario junto a su export.
 
 // BIBLIA 6 / 10: collections that MUST NEVER be queried or written from app code.
 export const FORBIDDEN_COLLECTIONS = Object.freeze([
@@ -130,6 +132,30 @@ export const CONTROL_STATUS = Object.freeze({
     BLOCKED: "BLOCKED",
     CLOSED: "CLOSED",
     CANCELLED: "CANCELLED",
+});
+
+// v5011.1 HOTFIX (bateria E2E diaria): bookingCore/bookingSaga/cajas.web/
+// crons.js seguian consumiendo el alias borrado COLLECTIONS, lo que producía
+// SyntaxError en tiempo de carga del modulo (reservas.web/crons fallaban en
+// cascada y las escrituras operativas apuntaban a coleccion undefined).
+// Se restaura como DERIVADO SSOT (no editable): reconstruye la vista plana
+// desde los grupos canonicos + CONTROL_TYPE (nombres V20 en ingles), por lo
+// que no reintroduce claves retiradas con significado propio ni valores
+// duplicados; las 8 colecciones absorbidas siguen SIN existir como
+// colecciones fisicas.
+// unit.ssot.v5011 (UNIT-STRUCT-01) verifica la integridad de este derivado.
+export const COLLECTIONS = Object.freeze({
+    ...BUSINESS_COLLECTIONS,
+    ...OPERATIONAL_COLLECTIONS,
+    // FASE3 ADR-05: subtipos operativos absorbidos en ControlOperativo.
+    SLOT_LOCKS: CONTROL_TYPE.SLOT_LOCK,
+    BOOKING_TRANSACTIONS: CONTROL_TYPE.BOOKING_TX,
+    COMPENSACIONES_PENDIENTES: CONTROL_TYPE.COMPENSATION,
+    ALERTAS_OPERATIVAS: CONTROL_TYPE.ALERT,
+    WEBHOOK_EVENTS: CONTROL_TYPE.WEBHOOK_EVENT,
+    RATE_LIMIT_BLOCKS: CONTROL_TYPE.RATE_LIMIT,
+    AVAILABILITY_DAYS_CACHE: CONTROL_TYPE.DAYS_CACHE,
+    DUAL_SLOT_CACHE: CONTROL_TYPE.DUAL_CACHE,
 });
 
 

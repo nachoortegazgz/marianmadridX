@@ -35,10 +35,18 @@ export const wixDataMock = {
   query(collection) {
     const rows = () => this._store.get(collection) || [];
     const state = { filters: [], limitN: 30 };
+    const cmpValue = (v) => (v instanceof Date ? v.getTime() : v);
     const q = {
       eq(field, value) { state.filters.push([field, value]); return q; },
       in(field, values) { state.filters.push([field, values]); return q; },
       ne(field, value) { state.filters.push(['!=', field, value]); return q; },
+      lt(field, value) { state.filters.push(['<', field, value]); return q; },
+      gt(field, value) { state.filters.push(['>', field, value]); return q; },
+      le(field, value) { state.filters.push(['<=', field, value]); return q; },
+      ge(field, value) { state.filters.push(['>=', field, value]); return q; },
+      between(field, low, high) { state.filters.push(['range', field, low, high]); return q; },
+      contains(field, value) { state.filters.push(['has', field, value]); return q; },
+      hasSome(field, values) { state.filters.push(['some', field, values]); return q; },
       ascending() { return q; },
       descending() { return q; },
       limit(n) { state.limitN = n; return q; },
@@ -47,6 +55,13 @@ export const wixDataMock = {
         let items = rows().slice();
         for (const f of state.filters) {
           if (f[0] === '!=') { items = items.filter((it) => it[f[1]] !== f[2]); }
+          else if (f[0] === '<') { items = items.filter((it) => cmpValue(it[f[1]]) < cmpValue(f[2])); }
+          else if (f[0] === '>') { items = items.filter((it) => cmpValue(it[f[1]]) > cmpValue(f[2])); }
+          else if (f[0] === '<=') { items = items.filter((it) => cmpValue(it[f[1]]) <= cmpValue(f[2])); }
+          else if (f[0] === '>=') { items = items.filter((it) => cmpValue(it[f[1]]) >= cmpValue(f[2])); }
+          else if (f[0] === 'range') { items = items.filter((it) => cmpValue(it[f[1]]) >= cmpValue(f[2]) && cmpValue(it[f[1]]) <= cmpValue(f[3])); }
+          else if (f[0] === 'has') { items = items.filter((it) => Array.isArray(it[f[1]]) && it[f[1]].includes(f[2])); }
+          else if (f[0] === 'some') { items = items.filter((it) => Array.isArray(it[f[1]]) && it[f[1]].some((v) => f[2].includes(v))); }
           else if (Array.isArray(f[1])) { items = items.filter((it) => f[1].includes(it[f[0]])); }
           else { items = items.filter((it) => it[f[0]] === f[1]); }
         }
