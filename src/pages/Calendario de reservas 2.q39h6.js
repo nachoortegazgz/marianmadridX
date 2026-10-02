@@ -13,7 +13,7 @@ import {
     getAvailableSlots,
     getCertifiedDualSlots,
     resolveStaffForSlot
-} from "backend/reservas.web";
+} from "backend/reservas.web.js";
 
 import {
     MESSAGE_TYPES,
@@ -27,7 +27,7 @@ import {
 } from "public/mmUtils";
 
 import { createWidgetBridge } from "public/widgetBridge";
-import { processDualBooking } from "backend/citasManager.web";
+import { processDualBooking } from "backend/citasManager.web.js";
 
 let currentServiceId = null;
 let currentSlug = null;

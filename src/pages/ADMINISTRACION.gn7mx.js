@@ -10,20 +10,20 @@ STANDARDS: G10 ASCII Strict, Velo V3 SDK.
 import wixMembersFrontend from "wix-members-frontend";
 import wixLocation from "wix-location-frontend";
 
-import { checkStaffCollaboratorAccess } from "backend/security.web";
+import { checkStaffCollaboratorAccess } from "backend/security.web.js";
 import {
   getCashierState,
   registerManualTransaction,
   registerZClosing,
-} from "backend/cajas.web";
+} from "backend/cajas.web.js";
 import {
   getInventoryDashboard,
   getInventoryReconciliationQueue,
-} from "backend/inventario.web";
+} from "backend/inventario.web.js";
 import {
   getQuarterlyTaxSummary,
   getLibroRegistroFacturasExpedidas,
-} from "backend/fiscalAggregator.web";
+} from "backend/fiscalAggregator.web.js";
 import {
   previewManagerPackage,
   createManagerPackageVersion,
@@ -31,8 +31,8 @@ import {
   getPreparedManagerPackages,
   downloadManagerPackageVersion,
   emailManagerPackageVersion,
-} from "backend/fiscalDocuments.web";
-import { askMarianAssistant } from "backend/marianAssistant.web";
+} from "backend/fiscalDocuments.web.js";
+import { askMarianAssistant } from "backend/marianAssistant.web.js";
 
 import { makeTraceId, URLS } from "public/mmUtils";
 import { createWidgetBridge } from "public/widgetBridge";
@@ -114,7 +114,12 @@ $w.onReady(async () => {
     .catch(() => null);
 
   if (!member) {
-    await wixMembersFrontend.authentication.promptLogin();
+    // promptLogin() no debe awaitarse dentro de onReady(): segun la
+    // documentacion oficial, esperar/retornar su promesa puede bloquear
+    // la carga de la pagina. Se maneja con .catch() y se continua.
+    wixMembersFrontend.authentication
+      .promptLogin()
+      .catch(() => {});
     return;
   }
 

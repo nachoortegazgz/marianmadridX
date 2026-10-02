@@ -22,7 +22,7 @@ import { _toPublicError } from "backend/responseUtils";
 import {
   getQuarterlyTaxSummary,
   getLibroRegistroFacturasExpedidasInternal,
-} from "backend/fiscalAggregator.web";
+} from "backend/fiscalAggregator.web.js";
 
 const CMS_TIMEOUT_MS = Number(SDK_CONFIG?.TIMEOUTS?.CMS_MS) || 15000;
 const DOCS_COL = BUSINESS_COLLECTIONS.HISTORICO_CIERRES_Z;

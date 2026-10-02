@@ -61,13 +61,13 @@ import {
   _updateCitaSafe
 } from "backend/booking/bookingCore";
 
-import { registerBookingPayment } from "backend/cajas.web";
+import { registerBookingPayment } from "backend/cajas.web.js";
 import { rateLimiter } from "backend/security";
 import { logger } from "backend/logger";
 import { logAuditEvent } from "backend/audit";
 import {
   revalidateExactAvailabilitySlot
-} from "backend/reservas.web";
+} from "backend/reservas.web.js";
 
 const log = logger;
 
@@ -844,7 +844,7 @@ async function _loadServiceConfigForCita(
   }
 
   const result =
-    await import("backend/reservas.web")
+    await import("backend/reservas.web.js")
       .then((module) =>
         module._getServiceBySlugOrIdInternal(
           serviceId,

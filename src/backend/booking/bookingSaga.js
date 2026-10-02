@@ -120,7 +120,7 @@ import {
     _invalidateCachesInternal,
     _getServiceBySlugOrIdInternal,
     _resolveStaffForSlotInternal,
-} from "backend/reservas.web";
+} from "backend/reservas.web.js";
 
 const log = logger;
 
