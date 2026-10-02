@@ -58,6 +58,7 @@ import {
 
 import { logger } from "backend/logger";
 import { getStaffDisplayName } from "backend/staff";
+import { normalizeBookingStatus } from "backend/validation";
 
 const log = logger;
 
@@ -659,8 +660,15 @@ function _toConfirmationDto(item) {
     if (item[key] !== undefined && item[key] !== null) dto[key] = item[key];
   }
   // Canonical read with legacy transition fallback (EOL 31/12/2026, ADR-06):
-  const status = item.bookingStatus;
-  if (status !== undefined && status !== null) dto.bookingStatus = status;
+  // rows persisted before FASE1 use the physical field "status"; the
+  // projection ALWAYS exposes the canonical bookingStatus via the central
+  // read normalizer (validation.js), never raw legacy fields.
+  const rawStatus = item[BOOKING_FIELDS.STATUS];
+  if (rawStatus === undefined || rawStatus === null) {
+    if (item.status !== undefined && item.status !== null) dto.bookingStatus = normalizeBookingStatus(item.status);
+  } else {
+    dto.bookingStatus = normalizeBookingStatus(rawStatus);
+  }
   if (item.paymentStatus !== undefined) dto.paymentStatus = item.paymentStatus;
   return dto;
 }
@@ -688,7 +696,9 @@ export const getConfirmedBookingForDisplay = webMethod(
       );
       const item = res?.items?.[0] || null;
       if (!item) return { ok: false, data: null, error: "NOT_FOUND" };
-      const status = item.bookingStatus;
+      const status = normalizeBookingStatus(
+        item[BOOKING_FIELDS.STATUS] ?? item.status
+      );
       if (
         status !== BOOKING_STATUS.CONFIRMED &&
         status !== BOOKING_STATUS.PENDING

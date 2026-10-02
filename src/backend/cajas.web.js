@@ -29,7 +29,9 @@ import wixData from "wix-data";
 import { getSecret } from "wix-secrets-backend";
 
 import {
-    COLLECTIONS,
+    BUSINESS_COLLECTIONS,
+    OPERATIONAL_COLLECTIONS,
+    CONTROL_TYPE,
     SINGLETONS,
     SDK_CONFIG,
     MOVEMENT_TYPE,
@@ -376,7 +378,7 @@ async function _getNextSequence(traceId) {
 
 async function _getLastMovement() {
     const res = await wixData
-        .query(COLLECTIONS.MOVIMIENTOS_CAJA)
+        .query(BUSINESS_COLLECTIONS.MOVIMIENTOS_CAJA)
         .descending("sequenceNumber")
         .limit(1)
         .find({ suppressAuth: true, consistentRead: true });
@@ -389,7 +391,7 @@ async function _getLastMovement() {
 
 async function _assertPeriodNotClosed(operationDate, traceId) {
     const existingZ = await wixData.get(
-        COLLECTIONS.HISTORICO_CIERRES_Z,
+        BUSINESS_COLLECTIONS.HISTORICO_CIERRES_Z,
         `Z_${operationDate}`, { suppressAuth: true }
     ).catch(() => null);
 
@@ -448,14 +450,17 @@ function _resolveFiscalBase({
 
 async function _queueAccountingResync(movement, err, traceId) {
     try {
-        await wixData.insert(COLLECTIONS.COMPENSACIONES_PENDIENTES, {
+        await wixData.insert(OPERATIONAL_COLLECTIONS.CONTROL_OPERATIVO, {
             _id: `REC_ACCT_SYNC_${movement.transactionId || "NA"}_${Date.now()}`,
+            controlType: CONTROL_TYPE.COMPENSATION,
+            dedupeKey: `COMP:REC_ACCT_SYNC_${movement.transactionId || "NA"}_${Date.now()}`,
+            traceId,
             kind: "RESYNC_LEDGER_ACCOUNTING",
             transactionId: movement.transactionId || null,
             totalAmount: Number(movement.totalAmount) || 0,
             paymentMethod: movement.paymentMethod || null,
             operationDescription: "Reintento de sincronizacion ledger tras fallo",
-            status: "PENDING_RECOVERY",
+            status: "PENDING",
             phase: "WAIT_FOR_ACCOUNTING_RESYNC",
             origin: "ACCOUNTING_PROJECTION_FAILED",
             alertRequired: true,
@@ -571,7 +576,7 @@ export const registerManualTransaction = webMethod(Permissions.SiteMember, async
 
         if (transactionId) {
             const existingRes = await wixData
-                .query(COLLECTIONS.MOVIMIENTOS_CAJA)
+                .query(BUSINESS_COLLECTIONS.MOVIMIENTOS_CAJA)
                 .eq("transactionId", transactionId)
                 .limit(1)
                 .find({ suppressAuth: true, consistentRead: true });
@@ -723,13 +728,13 @@ export const registerManualTransaction = webMethod(Permissions.SiteMember, async
                 _createdDate: new Date(),
             };
 
-            const saved = await wixData.insert(COLLECTIONS.MOVIMIENTOS_CAJA, movement, { suppressAuth: true });
+            const saved = await wixData.insert(BUSINESS_COLLECTIONS.MOVIMIENTOS_CAJA, movement, { suppressAuth: true });
             await _updateCajaActual(movement, traceId);
 
             // [SSOT-v5010.1 ZOMB-01] Sin proyeccion contable en linea (movimiento ya es SSOT).
             // Marcar estado de proyeccion para reconciliacion diferida via crons.
             try {
-                await wixData.update(COLLECTIONS.MOVIMIENTOS_CAJA,
+                await wixData.update(BUSINESS_COLLECTIONS.MOVIMIENTOS_CAJA,
                     Object.assign({}, saved, { projectionStatus: "PENDIENTE" }), { suppressAuth: true });
             } catch (pe) {
                 log.warn("projectionStatus mark failed (non-blocking)", { traceId, error: pe?.message });
@@ -737,7 +742,7 @@ export const registerManualTransaction = webMethod(Permissions.SiteMember, async
 
             // [SSOT-v5010.7 ZOMBIE-CLEAN] Ramal M365 eliminado: la coleccion
             // M365GraphSyncQueue fue dada de baja en v5010.1 (ver header de
-            // internalConfig BLOQUE 2). COLLECTIONS.M365_GRAPH_SYNC_QUEUE era
+            // internalConfig BLOQUE 2). HISTORICAL M365GraphSyncQueue era
             // undefined -> wixData.insert(undefined, ...) habria FALLADO EN
             // SILENCIO (catch non-blocking) si SDK_CONFIG.M365.ENABLED se
             // activara. Cero consumidores del queue (grep src+tools+crons).
@@ -759,7 +764,7 @@ export const registerManualTransaction = webMethod(Permissions.SiteMember, async
 
 async function _updateCajaActual(movement, traceId) {
     try {
-        const cajaCol = COLLECTIONS.CAJA_ACTUAL;
+        const cajaCol = BUSINESS_COLLECTIONS.CAJA_ACTUAL;
         let cashRegister = await wixData.get(cajaCol, CASH_REGISTER_ID, { suppressAuth: true }).catch(() => null);
         if (!cashRegister) {
             cashRegister = {
@@ -794,14 +799,17 @@ async function _updateCajaActual(movement, traceId) {
     } catch (err) {
         log.error("_updateCajaActual failed; queuing resync", { traceId, error: err?.message });
         try {
-            await wixData.insert(COLLECTIONS.COMPENSACIONES_PENDIENTES, {
+            await wixData.insert(OPERATIONAL_COLLECTIONS.CONTROL_OPERATIVO, {
                 _id: `REC_CAJA_SYNC_${movement.transactionId || "NA"}_${Date.now()}`,
+                controlType: CONTROL_TYPE.COMPENSATION,
+                dedupeKey: `COMP:REC_CAJA_SYNC_${movement.transactionId || "NA"}_${Date.now()}`,
+                traceId,
                 kind: "RESYNC_CAJA_BALANCE",
                 transactionId: movement.transactionId || null,
                 totalAmount: Number(movement.accountingAmount) || 0,
                 paymentMethod: movement.paymentMethod || null,
                 operationDescription: "Sincronizacion de saldo tras fallo en _updateCajaActual",
-                status: "PENDING_RECOVERY",
+                status: "PENDING",
                 phase: "WAIT_FOR_CAJA_RESYNC",
                 origin: "UPDATE_CAJA_FAILED",
                 alertRequired: true,
@@ -819,7 +827,7 @@ async function _updateCajaActual(movement, traceId) {
 
 // ============================================================================
 // [SSOT-v5010.7 ZOMBIE-CLEAN] _enqueueM365Sync ELIMINADA.
-// Referenciaba COLLECTIONS.M365_GRAPH_SYNC_QUEUE (undefined: coleccion dada
+// Referenciaba M365GraphSyncQueue (undefined: coleccion dada
 // de baja en v5010.1) y su unico call-site fue retirado arriba. No
 // reintroducir: ver bloque ZOMBIE-CLEAN en registerManualTransaction.
 // ============================================================================
@@ -882,13 +890,16 @@ export async function queueFiscalRecovery(recoveryData) {
     const canonicalAmount = Number(recoveryData.totalAmount) || 0;
     const canonicalDescription = recoveryData.operationDescription || "Fiscal recovery";
     try {
-        await wixData.insert(COLLECTIONS.COMPENSACIONES_PENDIENTES, {
+        await wixData.insert(OPERATIONAL_COLLECTIONS.CONTROL_OPERATIVO, {
             _id: `REC_${recoveryData.transactionId || Date.now()}_${Date.now()}`,
+            controlType: CONTROL_TYPE.COMPENSATION,
+            dedupeKey: `COMP:REC_${recoveryData.transactionId || Date.now()}_${Date.now()}`,
+            traceId,
             bookingIds: recoveryData.bookingIds || null,
             orderId: recoveryData.orderId || null,
             refundId: recoveryData.refundId || null,
             transactionId: recoveryData.transactionId || null,
-            status: "PENDING_RECOVERY",
+            status: "PENDING",
             totalAmount: canonicalAmount,
             operationDescription: canonicalDescription,
             paymentMethod: recoveryData.paymentMethod || null,
@@ -916,7 +927,7 @@ export const getCashierState = webMethod(Permissions.SiteMember, async (options 
     const { traceId } = options;
     try {
         await requireCajero(traceId);
-        const cashRegister = await wixData.get(COLLECTIONS.CAJA_ACTUAL, CASH_REGISTER_ID, { suppressAuth: true }).catch(() => null);
+        const cashRegister = await wixData.get(BUSINESS_COLLECTIONS.CAJA_ACTUAL, CASH_REGISTER_ID, { suppressAuth: true }).catch(() => null);
         return {
             status: "SUCCESS",
             data: cashRegister || {
@@ -951,7 +962,7 @@ export const registerZClosing = webMethod(Permissions.SiteMember, async (diaKey,
         }
 
         const existingZ = await wixData.get(
-            COLLECTIONS.HISTORICO_CIERRES_Z,
+            BUSINESS_COLLECTIONS.HISTORICO_CIERRES_Z,
             `Z_${cleanDiaKey}`, { suppressAuth: true }
         ).catch(() => null);
 
@@ -961,7 +972,7 @@ export const registerZClosing = webMethod(Permissions.SiteMember, async (diaKey,
         }
 
         let allMovements = [];
-        const query = wixData.query(COLLECTIONS.MOVIMIENTOS_CAJA)
+        const query = wixData.query(BUSINESS_COLLECTIONS.MOVIMIENTOS_CAJA)
             .eq("invoiceIssueDate", cleanDiaKey)
             .ascending("sequenceNumber")
             .limit(LEDGER_PAGE_SIZE);
@@ -1118,14 +1129,14 @@ export const registerZClosing = webMethod(Permissions.SiteMember, async (diaKey,
             _createdDate: new Date(),
         };
 
-        const saved = await wixData.insert(COLLECTIONS.HISTORICO_CIERRES_Z, zRecord, { suppressAuth: true });
+        const saved = await wixData.insert(BUSINESS_COLLECTIONS.HISTORICO_CIERRES_Z, zRecord, { suppressAuth: true });
 
-        const cashRegister = await wixData.get(COLLECTIONS.CAJA_ACTUAL, CASH_REGISTER_ID, { suppressAuth: true }).catch(() => null);
+        const cashRegister = await wixData.get(BUSINESS_COLLECTIONS.CAJA_ACTUAL, CASH_REGISTER_ID, { suppressAuth: true }).catch(() => null);
         if (cashRegister) {
             cashRegister.cashRegisterStatus = CASH_REGISTER_STATUS.CLOSED;
             cashRegister.closedAt = new Date();
             cashRegister._updatedDate = new Date();
-            await wixData.save(COLLECTIONS.CAJA_ACTUAL, cashRegister, { suppressAuth: true });
+            await wixData.save(BUSINESS_COLLECTIONS.CAJA_ACTUAL, cashRegister, { suppressAuth: true });
         }
 
         return { status: "SUCCESS", data: saved, error: null };
@@ -1143,7 +1154,7 @@ export async function verifyFiscalHashChainIntegrity(options = {}) {
     const batchSize = Number(options.limit) || LEDGER_PAGE_SIZE;
     const breaks = [];
     try {
-        const movements = await wixData.query(COLLECTIONS.MOVIMIENTOS_CAJA)
+        const movements = await wixData.query(BUSINESS_COLLECTIONS.MOVIMIENTOS_CAJA)
             .ascending("sequenceNumber")
             .limit(batchSize)
             .find({ suppressAuth: true });
@@ -1203,7 +1214,7 @@ export const registerGiftCardSale = webMethod(Permissions.SiteMember, async (pay
         }
 
         const existingRes = await wixData
-            .query(COLLECTIONS.MOVIMIENTOS_CAJA)
+            .query(BUSINESS_COLLECTIONS.MOVIMIENTOS_CAJA)
             .eq("transactionId", `GC_SALE-${giftCardId}`)
             .limit(1)
             .find({ suppressAuth: true, consistentRead: true });
@@ -1308,7 +1319,7 @@ export const registerGiftCardSale = webMethod(Permissions.SiteMember, async (pay
                 _createdDate: new Date(),
             };
 
-            const saved = await wixData.insert(COLLECTIONS.MOVIMIENTOS_CAJA, movement, { suppressAuth: true });
+            const saved = await wixData.insert(BUSINESS_COLLECTIONS.MOVIMIENTOS_CAJA, movement, { suppressAuth: true });
             await _updateCajaActual(movement, traceId);
 
             // [SSOT-v5010.1 ZOMB-01] Proyeccion contable en linea eliminada (MovimientosCaja es SSOT).
@@ -1351,7 +1362,7 @@ export const registerGiftCardRedemption = webMethod(Permissions.SiteMember, asyn
             `GC_REDEEM-${giftCardId}-${bookingId || "NA"}-${totalAmount}-${Date.now()}`;
 
         const existingRedemption = await wixData
-            .query(COLLECTIONS.MOVIMIENTOS_CAJA)
+            .query(BUSINESS_COLLECTIONS.MOVIMIENTOS_CAJA)
             .eq("transactionId", redemptionId)
             .limit(1)
             .find({ suppressAuth: true, consistentRead: true });
@@ -1364,7 +1375,7 @@ export const registerGiftCardRedemption = webMethod(Permissions.SiteMember, asyn
         let tipoImpositivo = IVA_RATES.GENERAL;
         if (serviceId) {
             const serviceRes = await wixData
-                .query(COLLECTIONS.SERVICIOS_CATALOGO)
+                .query(BUSINESS_COLLECTIONS.SERVICIOS_CATALOGO)
                 .eq("serviceId", serviceId)
                 .limit(1)
                 .find({ suppressAuth: true })
@@ -1474,7 +1485,7 @@ export const registerGiftCardRedemption = webMethod(Permissions.SiteMember, asyn
                 _createdDate: new Date(),
             };
 
-            const saved = await wixData.insert(COLLECTIONS.MOVIMIENTOS_CAJA, movement, { suppressAuth: true });
+            const saved = await wixData.insert(BUSINESS_COLLECTIONS.MOVIMIENTOS_CAJA, movement, { suppressAuth: true });
             await _updateCajaActual(movement, traceId);
 
             // [SSOT-v5010.1 ZOMB-01] Proyeccion contable en linea eliminada (MovimientosCaja es SSOT).
@@ -1507,18 +1518,19 @@ export const getMovimientoByBooking = webMethod(
         const cleanId = _safeTrim(bookingId);
 
         if (!cleanId) {
+            // FASE5 DTO contract: public envelope { ok, data, error }.
             return {
-                status: "ERROR",
-                meta: { traceId },
+                ok: false,
                 data: null,
-                error: { code: "INVALID_PAYLOAD", message: "bookingId is required" },
+                error: "INVALID_PAYLOAD",
+                meta: { traceId },
             };
         }
 
         try {
             // linkedBookingIds puede ser string o array segun _linkedBookingValue;
             // query por igualdad directa + filtro defensivo en cliente.
-            const candidates = await wixData.query(COLLECTIONS.MOVIMIENTOS_CAJA)
+            const candidates = await wixData.query(BUSINESS_COLLECTIONS.MOVIMIENTOS_CAJA)
                 .eq("linkedBookingIds", cleanId)
                 .limit(5)
                 .find();
@@ -1527,7 +1539,7 @@ export const getMovimientoByBooking = webMethod(
 
             if (items.length === 0) {
                 // Fallback: formato coma-separated guardado por _linkedBookingValue
-                const all = await wixData.query(COLLECTIONS.MOVIMIENTOS_CAJA)
+                const all = await wixData.query(BUSINESS_COLLECTIONS.MOVIMIENTOS_CAJA)
                     .contains("linkedBookingIds", cleanId)
                     .limit(20)
                     .find();
@@ -1545,10 +1557,10 @@ export const getMovimientoByBooking = webMethod(
 
             if (items.length === 0) {
                 return {
-                    status: "ERROR",
-                    meta: { traceId },
+                    ok: false,
                     data: null,
-                    error: { code: "MOVEMENT_NOT_FOUND", message: "No fiscal movement linked to booking" },
+                    error: "MOVEMENT_NOT_FOUND",
+                    meta: { traceId },
                 };
             }
 
@@ -1559,8 +1571,11 @@ export const getMovimientoByBooking = webMethod(
                 new Date(a.recordTimestamp || a._createdDate || 0)
             )[0];
 
+            // FASE5 DTO-whitelist: previousRecordHash NO se expone (encadenado
+            // interno Veri*Factu); solo recordHash forma parte del contrato
+            // publico del QR AEAT.
             return {
-                status: "SUCCESS",
+                ok: true,
                 meta: { traceId },
                 data: {
                     _id: mov._id,
@@ -1569,7 +1584,6 @@ export const getMovimientoByBooking = webMethod(
                     totalAmount: mov.totalAmount ?? null,
                     issuerTaxId: mov.issuerTaxId || null,
                     recordHash: mov.recordHash || null,
-                    previousRecordHash: mov.previousRecordHash || null,
                     digitalSignature: mov.digitalSignature || null,
                     verificationQR: mov.verificationQR || null,
                     recordTimestamp: mov.recordTimestamp || null,
@@ -1584,10 +1598,10 @@ export const getMovimientoByBooking = webMethod(
                 error: err?.message,
             });
             return {
-                status: "ERROR",
+                ok: false,
                 meta: { traceId },
                 data: null,
-                error: { code: "LEDGER_LOOKUP_FAILED", message: "Ledger lookup failed", traceId },
+                error: "LEDGER_LOOKUP_FAILED",
             };
         }
     }

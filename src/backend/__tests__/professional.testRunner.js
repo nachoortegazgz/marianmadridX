@@ -44,7 +44,7 @@ const mockCrypto = {
     sha256: sinon.stub()
 };
 
-// FASE4-CONSOLIDADO: alineado al SSOT canonico v7 (alias legacy COLLECTIONS/ESTADO_* erradicados)
+// FASE4-CONSOLIDADO: alineado al SSOT canonico v7 (alias umbrella y ESTADO_* erradicados)
 import { BUSINESS_COLLECTIONS, OPERATIONAL_COLLECTIONS, CONTROL_TYPE, BOOKING_STATUS, PAYMENT_STATUS, AEAT_INVOICE_TYPE, MOVEMENT_TYPE } from '../internalConfig.js';
 
 // Alias internos del test hacia enums canonicos (no debilita assertions)
