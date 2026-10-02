@@ -60,11 +60,13 @@ import {
     SDK_CONFIG,
     SLOT_SEARCH,
     BOOKING_STATUS,
+    BOOKING_TYPE,
     PAYMENT_STATUS,
     PAYMENT_METHOD,
     COMPENSATION_KIND,
     COMPENSATION_STATUS,
     APP_IDS,
+    BOOKING_FIELDS,
 } from "backend/internalConfig";
 
 import {
@@ -321,7 +323,9 @@ async function _compensateCreatedBookings(createdBookings, traceId) {
         const bookingId = booking?.bookingId || booking?.id;
         if (!bookingId) continue;
 
-        const status = _safeTrim(booking?.status).toUpperCase();
+        // FASE2 (ADR-06): lectura canonica bookingStatus PRIMERO; el legado
+        // "status" queda como fallback de LECTURA transitorio (EOL 31/12/2026).
+        const status = _safeTrim(booking?.[BOOKING_FIELDS.STATUS] || booking?.status).toUpperCase();
 
         // SAGA-06: nunca cancelar una reserva ya confirmada, cancelada o
         // reembolsada. Cancelar un CONFIRMED genera descuadre fiscal y de caja.
@@ -1483,8 +1487,12 @@ export async function executeBookingSaga(unsafePayload) {
                         // SAGA-06: tras confirmar, el booking pasa a CONFIRMED y ya
                         // no es cancelable. Se actualiza el estado local para que la
                         // compensacion posterior lo respete.
-                        booking.status =
+                        // FASE2 (ADR-06): se escribe en bookingStatus (canonico);
+                        // el setter legado "status" queda eliminado del objeto local.
+                        booking.bookingStatus =
+                            _safeTrim(confirmResult?.booking?.bookingStatus) ||
                             _safeTrim(confirmResult?.booking?.status) ||
+                            _safeTrim(confirmResult?.bookingStatus) ||
                             _safeTrim(confirmResult?.status) ||
                             BOOKING_STATUS_CONFIRMED;
                     }
@@ -1564,7 +1572,7 @@ export async function executeBookingSaga(unsafePayload) {
                             startDate: getUtcDateFromMadridLocal(f1LocalStart),
                             endDate: getUtcDateFromMadridLocal(f1LocalEnd),
                             dateYmd: f1LocalStart.slice(0, 10),
-                            bookingType: isDual ? "DUAL_F1" : "SIMPLE",
+                            bookingType: isDual ? BOOKING_TYPE.DUALF1 : BOOKING_TYPE.SIMPLE,
                             status: citaStatus,
                             bookingStatus: citaStatus,
                             paymentStatus: paymentStatus,
@@ -1616,7 +1624,7 @@ export async function executeBookingSaga(unsafePayload) {
                                 startDate: getUtcDateFromMadridLocal(f2LocalStart),
                                 endDate: getUtcDateFromMadridLocal(f2LocalEnd),
                                 dateYmd: f2LocalStart.slice(0, 10),
-                                bookingType: "DUAL_F2",
+                                bookingType: BOOKING_TYPE.DUALF2,
                                 status: citaStatus,
                                 bookingStatus: citaStatus,
                                 paymentStatus: paymentStatus,

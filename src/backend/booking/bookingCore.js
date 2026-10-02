@@ -80,6 +80,7 @@ import {
     PAYMENT_STATUS,
     BOOKING_STATUS,
     INACTIVE_BOOKING_STATUSES,
+    BOOKING_FIELDS,
 } from "backend/internalConfig";
 import {
     _safeTrim,
@@ -735,6 +736,10 @@ export async function _failTransaction(pairToken, errorMessage) {
 const CITAS_COL = BUSINESS_COLLECTIONS.CITAS_F2;
 
 // CORE-07: statuses use SSOT EN = Wix native. No dual alias lists.
+// FASE2 (ADR-06): the CitasF2 PHYSICAL canonical field is bookingStatus
+// (BOOKING_FIELDS.STATUS). The legacy "status" key is accepted on READ only
+// as a transitional fallback and is NEVER written to the document anymore.
+// Zero-fallback-on-write rule (MATRIZ H / transversal).
 export async function _persistBooking(params, traceId) {
     const p = params || {};
     const bookingId = p.bookingId;
@@ -770,9 +775,11 @@ export async function _persistBooking(params, traceId) {
     ).toUpperCase();
 
     // CORE-07: explicit status wins. Defaults use Wix-native SSOT EN only.
+    // FASE2 (ADR-06): canonical bookingStatus is read FIRST; legacy p.status
+    // remains as transitional READ fallback only (EOL 31/12/2026).
     const statusCita = String(
-        p.status ||
         p.bookingStatus ||
+        p.status ||
         (
             metaPago === String(PAYMENT_STATUS.PENDING_PAYMENT).toUpperCase() ||
             metaPago === String(PAYMENT_STATUS.NOT_PAID).toUpperCase()
@@ -788,7 +795,7 @@ export async function _persistBooking(params, traceId) {
     if (typeof normalizedMeta !== "object" || normalizedMeta === null || Array.isArray(normalizedMeta)) {
         normalizedMeta = {};
     }
-    normalizedMeta = { ...normalizedMeta, status: statusCita, paymentStatus: metaPago };
+    normalizedMeta = { ...normalizedMeta, bookingStatus: statusCita, paymentStatus: metaPago };
 
     const doc = {
         bookingId: String(bookingId),
@@ -801,7 +808,9 @@ export async function _persistBooking(params, traceId) {
         endDate: endDateObj,
         dateYmd,
         bookingType: normalizeBookingType(p.tipo || p.bookingType),
-        status: statusCita,
+        // FASE2 (ADR-06): write ONLY the canonical physical field. The legacy
+        // "status" key is no longer persisted; reads tolerate it until EOL.
+        [BOOKING_FIELDS.STATUS]: statusCita,
         paymentStatus: metaPago,
         meta: normalizedMeta,
         contactDetails: p.contactDetails || {},

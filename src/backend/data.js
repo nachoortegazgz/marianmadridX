@@ -26,6 +26,7 @@ import wixData from "wix-data";
 
 import {
     BUSINESS_COLLECTIONS,
+    OPERATIONAL_COLLECTIONS,
 
     EU_VAT_PREFIXES,
     FISCAL_ROLE,
@@ -35,11 +36,16 @@ import {
     CONTROL_TYPE,
     CONTROL_STATUS,
     TIMECLOCK_TYPE,
+    INVENTORY_MOVEMENT_TYPE,
+    NEGATIVE_INVENTORY_MOVEMENT_TYPES,
+    MAGNITUDE,
 } from "backend/internalConfig";
 
 import {
     assertValidEnum,
     assertCitasF2,
+    assertMovimientosInventario,
+    expectedInventoryMagnitude,
 } from "backend/validation";
 
 import { logger } from "backend/logger";
@@ -824,8 +830,35 @@ export function CitasF2_beforeUpdate(item) {
 }
 
 // =============================================================================
-// BLOQUE 14 - MOVIMIENTOS INVENTARIO (append-only, SSOT 13.1)
+// BLOQUE 14 - MOVIMIENTOS INVENTARIO (append-only, SSOT 13.1, FASE4-INV)
 // =============================================================================
+
+export async function MovimientosInventario_beforeInsert(item) {
+    if (!item || typeof item !== "object") return item;
+
+    // Validacion completa: enum canonico (con normalizacion legacy->canonico
+    // y escritura del valor canonico), idempotencia (movementToken),
+    // trazabilidad (traceId + operationDescription) y cuadre de stock.
+    assertMovimientosInventario(item);
+
+    // Derivacion canonica de magnitude si el productor no la envio
+    // (SSOT 13.1: magnitude deriva del signo de quantityDelta).
+    if (item.magnitude === undefined || item.magnitude === null || item.magnitude === "") {
+        item.magnitude = expectedInventoryMagnitude(item.movementType, item.quantityDelta);
+    }
+
+    // Unicidad de movementToken (idempotencia dura a nivel de hook).
+    const token = _safeTrim(item.movementToken);
+    const existing = await wixData.query(OPERATIONAL_COLLECTIONS.MOVIMIENTOS_INVENTARIO)
+        .eq("movementToken", token)
+        .limit(1)
+        .find({ suppressAuth: true });
+    if (existing?.items?.length > 0) {
+        _fiscalError(`movementToken duplicado en MovimientosInventario: ${token}`);
+    }
+
+    return item;
+}
 
 export function MovimientosInventario_beforeUpdate() {
     _fiscalError("MovimientosInventario es append-only");

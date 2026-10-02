@@ -1,0 +1,63 @@
+== FASE0 EVIDENCIA RENOVADA 2026-10-02T05:54:44Z ==
+
+== GREP \bCOLLECTIONS\b (consumidores, excluyendo comentarios internalConfig) ==
+
+== Claves a retirar F1: CATEGORIAS_SERVICIO / LIBRO_REGISTRO_FACTURAS_EXPEDIDAS ==
+src/backend/__tests__/professional.testRunner.js:495:                libro: 'LIBRO_REGISTRO_FACTURAS_EXPEDIDAS',
+src/backend/__tests__/audit.e2e.js:246:    // Paso 5: Verificar LIBRO_REGISTRO_FACTURAS_EXPEDIDAS
+src/backend/__tests__/audit.e2e.js:262:        "Paso 5: Estructura LIBRO_REGISTRO_FACTURAS_EXPEDIDAS"
+(fin bloque)
+
+== BOOKING_TYPE.NORMAL / DUAL legado ==
+(fin bloque)
+
+== PAYMENT_STATUS.UNPAID ==
+
+== prepareScheduledManagerPackages ==
+src/backend/tests/fiscalAggregator.read.test.mjs:104:test('DEDUPE-01 prepareScheduledManagerPackages removed from aggregator', () => {
+src/backend/tests/fiscalAggregator.read.test.mjs:105:  assert.strictEqual(FA.prepareScheduledManagerPackages, undefined);
+src/backend/fiscalAggregator.web.js:515:// prepareScheduledManagerPackages REMOVED here (BIBLIA 17.6 dedupe).
+src/backend/fiscalDocuments.web.js:310:export async function prepareScheduledManagerPackages(options = {}) {
+
+== 8 colecciones absorbidas ==
+src/backend/internalConfig.js:893:    // Verificar colecciones criticas (FASE3: SLOT_LOCKS absorbida en ControlOperativo)
+src/backend/audit.js:8:COLECCION DESTINO: ALERTAS_OPERATIVAS.
+src/backend/audit.js:14:            matriz V20.1. ALERTAS_OPERATIVAS mantiene su schema.
+
+== Legacy A-E MATRIZ ==
+src/pages/Calendario de reservas 2.q39h6.js:164:                        _safeTrim(payload.dateYMD || payload.dateYmd || ""),
+src/pages/Calendario de reservas 2.q39h6.js:170:                        _safeTrim(payload.dateYMD || payload.dateYmd || ""),
+src/backend/fiscalAggregator.web.js:73:  // Canonical AEAT: tipoImpositivo (BIBLIA 11.4). Neither taxRate nor tasaIva
+src/backend/fiscalAggregator.web.js:78:  if (m.taxRate !== undefined && m.taxRate !== null) {
+src/backend/fiscalAggregator.web.js:79:    log.warn("legacy-read taxRate", { id: m?._id });
+src/backend/fiscalAggregator.web.js:80:    return Number(m.taxRate);
+src/backend/fiscalAggregator.web.js:194:    const taxRate = _readTaxRate(m);
+src/backend/fiscalAggregator.web.js:195:    const taxRateKey = String(taxRate);
+src/backend/fiscalAggregator.web.js:240:      state.breakdownByVatRate[taxRateKey] = { taxRate, taxableAmount: 0, taxAmount: 0, total: 0, operations: 0 };
+src/backend/fiscalAggregator.web.js:355:        tasaIva: item.taxRate,
+src/backend/fiscalAggregator.web.js:410:      taxRate: `${Math.round(_readTaxRate(m) * 100)}%`,
+src/backend/__tests__/professional.testRunner.js:334:                taxRate: 0.21,
+src/backend/__tests__/audit.e2e.js:189:        taxRate: IVA_RATES.GENERAL,
+src/backend/__tests__/audit.e2e.js:389:        taxRate: IVA_RATES.GENERAL,
+src/backend/__tests__/audit.e2e.js:835:        taxRate: IVA_RATES.GENERAL,
+src/backend/contabilidad.js:82:    const value = Number(movement?.taxRate ?? movement?.tipoImpositivo);
+src/backend/contabilidad.js:202:        line.taxableBaseOrNonSubjectAmount, line.taxRate, line.chargedTaxAmount,
+src/backend/contabilidad.js:227:        taxRate: tax?.taxRate ?? null,
+src/backend/contabilidad.js:398:    const tax = { taxableBaseOrNonSubjectAmount: net, taxRate: tipoImpositivo, chargedTaxAmount: vat || null };
+src/backend/booking/bookingSaga.js:33:  - SAGA-08: availableStaff con fallback (staffDisponible, staffMemberIds).
+src/backend/booking/bookingSaga.js:593:    // availableStaff; el mapping UX expone staffDisponible.
+src/backend/booking/bookingSaga.js:596:        service.staffDisponible ||
+src/backend/reservas.web.js:476:  // Legacy alias taxRate is not read (no silent conversion).
+src/backend/reservas.web.js:630:  // linkFases alias no longer exists in the mapped object.
+src/backend/events.js:529:                        taxRate: Number(
+src/backend/events.js:530:                            originalMovement.taxRate ?? 21
+src/backend/events.js:697:                taxRate: 21,
+src/backend/events.js:944:                taxRate: Number(
+src/backend/events.js:945:                    originalMovement.taxRate ?? 21
+src/backend/events.js:969:                    tipo: Number(originalMovement.taxRate ?? 21),
+src/backend/eventLog.js:359:        tipoImpositivo: Number(input.taxRate ?? catalog?.taxRate ?? 0),
+src/backend/eventLog.js:428:        taxRate: Number(input.taxRate ?? IVA_RATES.GENERAL),
+src/backend/eventLog.js:525:            taxRate: Number(d.taxRate ?? d.tipo ?? 0),
+src/backend/eventLog.js:764:                taxRate: Number(payload?.taxRate) || IVA_RATES.GENERAL,
+
+== Frontend wix-data ==

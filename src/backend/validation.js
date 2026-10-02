@@ -15,6 +15,11 @@ import {
     BOOKING_STATUS,
     BOOKING_TYPE,
     PAYMENT_STATUS,
+    INVENTORY_MOVEMENT_TYPE,
+    MAGNITUDE,
+    NEGATIVE_INVENTORY_MOVEMENT_TYPES,
+    POSITIVE_INVENTORY_MOVEMENT_TYPES,
+    INVENTORY_MOVEMENT_ALIAS,
     normalizeBookingType,
 } from "backend/internalConfig";
 
@@ -138,6 +143,109 @@ export function assertCompensationKind(value, kindEnum) {
 }
 export function assertCompensationStatus(value, statusEnum) {
     return assertValidEnum(value, statusEnum, "compensationStatus");
+}
+
+// -----------------------------------------------------------------------------
+// MovimientosInventario full assertion (SSOT 13.1, FASE4-INV).
+// Canonical enum INVENTORY_MOVEMENT_TYPE; legacy aliases ENTRADA/SALIDA are
+// already canonical values so no normalizer is required for them. magnitude
+// must agree with the sign of quantityDelta per MAGNITUDE contract.
+// -----------------------------------------------------------------------------
+// Alias funcionales declarados en internalConfig (ADR-09): ONLINE_SALE y
+// VENTA_ONLINE son tokens historicos del flujo de pedidos Wix que equivalen
+// a SALIDA. Se mapean aqui (unica ubicacion permitida para adaptadores
+// legacy) con warning; las escrituras nuevas deben usar el enum canonico.
+const INVENTORY_LEGACY_TYPE_MAP = Object.freeze({
+    COMPRA: INVENTORY_MOVEMENT_TYPE.ENTRADA,
+    PURCHASE: INVENTORY_MOVEMENT_TYPE.ENTRADA,
+    VENTA: INVENTORY_MOVEMENT_TYPE.SALIDA,
+    SALE: INVENTORY_MOVEMENT_TYPE.SALIDA,
+    STOCK_OUT: INVENTORY_MOVEMENT_TYPE.SALIDA,
+    STOCK_IN: INVENTORY_MOVEMENT_TYPE.ENTRADA,
+    WASTE: INVENTORY_MOVEMENT_TYPE.MERMA,
+    ...INVENTORY_MOVEMENT_ALIAS,
+});
+
+export function normalizeInventoryMovementType(raw) {
+    const s = String(raw ?? "").trim().toUpperCase();
+    if (!s) return s;
+    const direct = Object.values(INVENTORY_MOVEMENT_TYPE);
+    if (direct.includes(s)) return s;
+    const mapped = INVENTORY_LEGACY_TYPE_MAP[_canonicalKey(s)];
+    if (mapped !== undefined) {
+        log.warn("legacy inventory movementType normalized on read", { raw: s, canonical: mapped });
+        return mapped;
+    }
+    return s; // unknown: leave as-is, let assertValidEnum fail loudly
+}
+
+export function expectedInventoryMagnitude(movementType, quantityDelta) {
+    const t = normalizeInventoryMovementType(movementType);
+    if (POSITIVE_INVENTORY_MOVEMENT_TYPES.includes(t)) return MAGNITUDE.POSITIVE;
+    if (NEGATIVE_INVENTORY_MOVEMENT_TYPES.includes(t)) return MAGNITUDE.NEGATIVE;
+    // AJUSTE generic not in enum; any other type -> magnitude follows delta sign
+    const d = Number(quantityDelta);
+    if (Number.isFinite(d) && d > 0) return MAGNITUDE.POSITIVE;
+    if (Number.isFinite(d) && d < 0) return MAGNITUDE.NEGATIVE;
+    return MAGNITUDE.NEUTRAL;
+}
+
+export function assertMovimientosInventario(item) {
+    if (!item || typeof item !== "object") {
+        throw new Error("VALIDATION_ERROR: MovimientosInventario item must be an object");
+    }
+    const canonicalType = normalizeInventoryMovementType(item.movementType);
+    assertValidEnum(canonicalType, INVENTORY_MOVEMENT_TYPE, "movementType");
+    // Cero fallback en escritura (MATRIZ H.2): tras la normalizacion del
+    // hook se persiste SIEMPRE el valor canonico, nunca el alias legacy.
+    item.movementType = canonicalType;
+    if (!_nonEmpty(item.movementToken)) {
+        throw new Error("VALIDATION_ERROR: MovimientosInventario requires movementToken (idempotencia)");
+    }
+    if (!_nonEmpty(item.traceId)) {
+        throw new Error("VALIDATION_ERROR: MovimientosInventario requires traceId (SSOT-12)");
+    }
+    if (!_nonEmpty(item.operationDescription)) {
+        throw new Error("VALIDATION_ERROR: MovimientosInventario requires operationDescription");
+    }
+    if (!_nonEmpty(item.sku)) {
+        throw new Error("VALIDATION_ERROR: MovimientosInventario requires sku");
+    }
+    const qty = Number(item.quantity);
+    if (!Number.isFinite(qty) || qty <= 0) {
+        throw new Error(`VALIDATION_ERROR: quantity (${String(item.quantity)}) debe ser > 0`);
+    }
+    const delta = Number(item.quantityDelta);
+    if (!Number.isFinite(delta) || delta === 0) {
+        throw new Error(`VALIDATION_ERROR: quantityDelta (${String(item.quantityDelta)}) no puede ser 0`);
+    }
+    if (Math.abs(Math.abs(delta) - qty) > 0.001) {
+        throw new Error(
+            `VALIDATION_ERROR: |quantityDelta| (${Math.abs(delta)}) debe coincidir con quantity (${qty})`
+        );
+    }
+    const before = Number(item.stockBefore);
+    const after = Number(item.stockAfter);
+    if (!Number.isFinite(before) || !Number.isFinite(after)) {
+        throw new Error("VALIDATION_ERROR: stockBefore/stockAfter numericos obligatorios");
+    }
+    if (Math.abs((before + delta) - after) > 0.001) {
+        throw new Error(
+            `VALIDATION_ERROR: stockAfter (${after}) != stockBefore (${before}) + quantityDelta (${delta})`
+        );
+    }
+    const expectedMag = expectedInventoryMagnitude(item.movementType, delta);
+    if (item.magnitude !== undefined && Number(item.magnitude) !== expectedMag) {
+        throw new Error(
+            `VALIDATION_ERROR: magnitude (${String(item.magnitude)}) incoherente con movementType/quantityDelta; esperado ${expectedMag}`
+        );
+    }
+    if (before + delta < -0.001 && expectedMag === MAGNITUDE.NEGATIVE) {
+        throw new Error(
+            `VALIDATION_ERROR: movimiento generaria stock negativo (${before} + ${delta})`
+        );
+    }
+    return true;
 }
 
 // -----------------------------------------------------------------------------

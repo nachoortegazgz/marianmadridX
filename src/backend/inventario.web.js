@@ -230,7 +230,11 @@ export async function recordInventoryMovementSafe(sku, movementType, quantity, m
     quantityDelta: qty,
     stockBefore,
     stockAfter,
+    // FASE4-INV (ADR-09): alias legacy admitidos en la firma del productor;
+    // el hook beforeInsert normaliza y persiste SIEMPRE el valor canonico
+    // de INVENTORY_MOVEMENT_TYPE (cero fallback en escritura).
     movementType: _safeTrim(movementType).toUpperCase(),
+    operationDescription: meta.operationDescription || meta.reason || meta.motivo || "",
     reason: meta.reason || meta.motivo || "",
     referenceId: meta.referenceId || null,
     orderId: meta.orderId || null,
