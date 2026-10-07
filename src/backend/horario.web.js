@@ -1,19 +1,16 @@
 /*
 =============================================================================
 MODULE: backend/horario.web.js
-VERSION: v8.1-SSOT-MASTER
+VERSION: v8.1-SSOT-MASTER-SDKv2
 RESPONSIBILITY: Fichajes laborales (RD 8/2019). Append-only. Firma HMAC.
-CORRECTIONS: C-01 (sin active), C-03/C-04 (memberId), BUG-04 FIX (campos
-             inexistentes eliminados: employeeIdentifier/employeeName/
-             recordingName/deviceIp/type → recordType).
+FIXES APLICADOS SDK v2:
+  - Migración de members.getCurrentMember() a currentMember.getMember()
 =============================================================================
 */
 
-import wixData from "backend/dataClient";
 import { webMethod, Permissions } from "wix-web-module";
 import wixData from "backend/dataClient";
 import { currentMember } from "@wix/members";
-import { members } from "@wix/members";
 
 import {
     BUSINESS_COLLECTIONS,
@@ -35,7 +32,6 @@ import {
     getStaffDisplayName,
 } from "backend/staff";
 
-import { logger } from "backend/logger";
 import { hmacSha256Hex } from "backend/securityEngine";
 import { SECRETS, getSecret } from "backend/mmSecrets";
 
@@ -48,7 +44,7 @@ const log = logger;
 const REGISTROS_COL = BUSINESS_COLLECTIONS.REGISTROS_HORARIOS_STAFF;
 
 // =============================================================================
-// HELPERS DE ZONA HORARIA (Europe/Madrid, SSOT)
+// HELPERS DE ZONA HORARIA
 // =============================================================================
 
 function _getMadridNow() {
@@ -82,12 +78,13 @@ function _safeTrim(v) {
 }
 
 // =============================================================================
-// RESOLUCION DE CONTEXTO STAFF (C-03: memberId, sin guard active)
+// RESOLUCION DE CONTEXTO STAFF
 // =============================================================================
 
 async function _resolveStaffContext(traceId) {
     try {
-        const member = await members.getCurrentMember();
+        // SDK v2: currentMember.getMember()
+        const member = await currentMember.getMember();
         if (!member) return null;
 
         const memberId = _safeTrim(member._id);
@@ -95,7 +92,6 @@ async function _resolveStaffContext(traceId) {
             member.loginEmail || member.contactDetails?.email
         ).toLowerCase();
 
-        // C-03: resolucion por memberId (prioritario)
         let staff = await findStaffByMemberId(memberId, traceId);
         if (!staff && email) {
             const { findStaff } = await import("backend/staff");
@@ -103,15 +99,13 @@ async function _resolveStaffContext(traceId) {
         }
         if (!staff) return null;
 
-        // C-01: sin guard !staff.active (campo eliminado)
         return {
             memberId,
             email,
             resourceId: staff.resourceId,
-            memberId: staff.memberId,
             displayName: getStaffDisplayName(staff),
-            rolWebsite: staff.rolWebsite, // C-02
-            rolBookings: staff.rolBookings, // C-02
+            rolWebsite: staff.rolWebsite,
+            rolBookings: staff.rolBookings,
         };
     } catch (error) {
         log.error("_resolveStaffContext failed", {
@@ -123,7 +117,7 @@ async function _resolveStaffContext(traceId) {
 }
 
 // =============================================================================
-// WEBMETHODS PUBLICOS (BIBLIA 14.7)
+// WEBMETHODS PUBLICOS
 // =============================================================================
 
 export const getMyStaffContext = webMethod(
@@ -139,7 +133,6 @@ export const getMyStaffContext = webMethod(
                     error: { code: "NOT_STAFF", message: "Miembro sin ficha staff activa" },
                 };
             }
-            // DTO publico whitelist (RGPD): nunca notes/thirdPartyId
             return {
                 status: "OK",
                 data: {
@@ -185,7 +178,6 @@ export const registrarFichaje = webMethod(
             const monthKey = _getMadridMonthKey(now);
             const recordedTime = _getMadridTime(now);
 
-            // BUG-04 FIX: solo campos del schema canonico (cms.v8.1-FINAL)
             const record = {
                 [F.RESOURCE_ID]: ctx.resourceId,
                 [F.MEMBER_ID]: ctx.memberId,
@@ -204,10 +196,7 @@ export const registrarFichaje = webMethod(
                 [F.TRACE_ID]: traceId,
             };
 
-            // Firma HMAC de integridad (RD 8/2019)
             record[F.SIGNATURE] = await signTimeclockRecord(record);
-
-            // Validacion centralizada (SSOT-07)
             assertRegistrosHorariosStaff(record);
 
             const saved = await wixData.insert(REGISTROS_COL, record, {
@@ -389,7 +378,6 @@ export const getHistorialFichajes = webMethod(
                 .limit(limit)
                 .find({ suppressAuth: true });
 
-            // DTO whitelist: nunca signature/meta completos, nunca deviceIpAddress
             const items = (res?.items || []).map((f) => ({
                 registradoEn: f[F.RECORDED_AT],
                 horaRegistrada: f[F.RECORDED_TIME],
@@ -467,7 +455,7 @@ export const registrarAjusteHorario = webMethod(
 
             const record = {
                 [F.RESOURCE_ID]: targetResourceId,
-                [F.MEMBER_ID]: staff.memberId, // C-04
+                [F.MEMBER_ID]: staff.memberId,
                 [F.STAFF_NAME]: getStaffDisplayName(staff),
                 [F.RECORDED_AT]: recordedAt,
                 [F.RECORDED_TIME]: recordedTime,
@@ -540,7 +528,6 @@ export const getResumenHoras = webMethod(
                 porDia[dk].eventos += 1;
             }
 
-            // Calculo por dia
             for (const dk of Object.keys(porDia)) {
                 const delDia = fichajes
                     .filter((f) => f[F.DAY_KEY] === dk)
