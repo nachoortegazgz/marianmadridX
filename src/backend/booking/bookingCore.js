@@ -98,7 +98,7 @@ import {
     // v5010.4 (FASE 2): huella canonica definida en bookingUtils (capa de
     // utilidades puras, segun precedencia mmUtils > bookingUtils > core > web).
     // Evita el ciclo bookingUtils -> bookingCore que se habia introducido.
-    _buildPairFingerprint,
+    buildPairFingerprint as _buildPairFingerprint,
 } from "backend/booking/bookingUtils";
 
 const log = logger;

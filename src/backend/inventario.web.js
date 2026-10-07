@@ -62,7 +62,6 @@ import { normalizeError } from "backend/booking/bookingCore";
 import { logAuditEvent } from "backend/audit";
 
 import { hashSHA256, hmacSha256Hex } from "backend/securityEngine";
-import { SECRETS, getSecret } from "backend/mmSecrets";
 import { secrets } from "@wix/secrets";
 import { SECRETS } from "backend/mmSecrets";
 

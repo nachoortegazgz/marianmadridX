@@ -20,6 +20,15 @@ CERO LEGACY / CERO ALIAS:
 
 import { SDK_CONFIG, BOOKINGS_ADDON_CONFIG } from "backend/internalConfig";
 
+// SSOT delegation (zero-duplication policy): these pure helpers live in
+// public/mmUtils.js. Booking-domain modules import them through this facade.
+export {
+  cleanGuidList,
+  toUtcRange,
+  readDurationRange,
+  resolveExpectedSlotMinutes,
+} from "public/mmUtils";
+
 // =============================================================================
 // BLOQUE 1 - HASH E IDENTIFICADORES DETERMINISTAS
 // =============================================================================
@@ -274,6 +283,104 @@ export function getSharedResourceId(wrapperF1, wrapperF2) {
   const r2 = safeTrim(wrapperF2 && wrapperF2.resourceId);
   if (!r1 || !r2) return null;
   return r1 === r2 ? r1 : null;
+}
+
+/**
+ * ResourceIds staff (GUIDs) extraidos de un slot Wix Bookings. Acepta las
+ * variantes de forma y tipo de recurso que la API devuelve segun version:
+ *   group.resourceTypeId | group.resourceType.id | group.resourceType._id |
+ *   group.typeId   y   resource.id | resource._id | resource.resourceId.
+ * Fallback final: resource directo o resourceId plano en el slot.
+ * Unica implementacion del dominio (reservas.web y bookingCore delegan aqui).
+ */
+export function getResourceIdsFromSlot(slot, staffResourceTypeId) {
+  if (!slot || typeof slot !== "object") return [];
+  const normalizedSlot = (slot.slot && typeof slot.slot === "object")
+    ? { ...slot.slot, ...slot }
+    : slot;
+
+  let groups = [];
+  if (Array.isArray(normalizedSlot.availableResources)) {
+    groups = normalizedSlot.availableResources;
+  } else if (
+    normalizedSlot.slot &&
+    typeof normalizedSlot.slot === "object" &&
+    Array.isArray(normalizedSlot.slot.availableResources)
+  ) {
+    groups = normalizedSlot.slot.availableResources;
+  }
+
+  if (groups.length > 0) {
+    const staffGroup = groups.find(
+      (group) => String(
+        group?.resourceTypeId ??
+        group?.resourceType?.id ??
+        group?.resourceType?._id ??
+        group?.typeId ?? ""
+      ) === String(staffResourceTypeId)
+    );
+    if (!staffGroup) return [];
+    return Array.from(
+      new Set(
+        (staffGroup.resources || [])
+          .map((resource) => safeTrim(resource?.id || resource?._id || resource?.resourceId))
+          .filter(looksLikeGuid)
+      )
+    );
+  }
+
+  const directId = safeTrim(
+    normalizedSlot.resource?.id ||
+    normalizedSlot.resource?._id ||
+    normalizedSlot.resource?.resourceId ||
+    normalizedSlot.resourceId
+  );
+  return looksLikeGuid(directId) ? [directId] : [];
+}
+
+/**
+ * Balanceo de carga SSOT: primer resourceId con menor carga del dia.
+ * loadMap: { resourceId -> count }. Empates -> orden lexicografico estable.
+ * Devuelve null si candidates esta vacio.
+ */
+export function pickStaffByLowestLoad(candidates, loadMap) {
+  const ids = (Array.isArray(candidates) ? candidates : [])
+    .map((entry) => safeTrim(entry))
+    .filter(Boolean);
+  if (!ids.length) return null;
+  const map = (loadMap && typeof loadMap === "object") ? loadMap : {};
+  return ids.slice().sort().reduce(
+    (best, id) => ((Number(map[id]) || 0) < (Number(map[best]) || 0) ? id : best),
+    ids.slice().sort()[0]
+  );
+}
+
+/**
+ * Duracion fase 2 de un servicio dual encadenado (linkedPhases): resuelve
+ * recursivamente el servicio vinculado via getServiceFn (inyectada para
+ * evitar el ciclo reservas.web <-> bookingUtils). Guarda anti-bucle con
+ * visited. Devuelve 0 cuando no hay cadena valida.
+ */
+export async function resolveLinkedPhase2Duration(
+  linkedServiceId, traceId, visited, getServiceFn
+) {
+  const id = safeTrim(linkedServiceId);
+  if (!id || !looksLikeGuid(id)) return 0;
+  const seen = visited instanceof Set ? visited : new Set();
+  if (seen.has(id)) return 0;
+  seen.add(id);
+  if (typeof getServiceFn !== "function") return 0;
+  const result = await getServiceFn(id, traceId);
+  const service = result && result.status === "SUCCESS" ? result.data : null;
+  if (!service) return 0;
+  const phase2 = Number(service.phase2Duration) || 0;
+  if (phase2 > 0) return phase2;
+  const allowCombine = service.allowCombine === true;
+  const nextLink = safeTrim(service.linkedPhases);
+  if (allowCombine && looksLikeGuid(nextLink) && nextLink !== id) {
+    return resolveLinkedPhase2Duration(nextLink, traceId, seen, getServiceFn);
+  }
+  return 0;
 }
 
 // =============================================================================
