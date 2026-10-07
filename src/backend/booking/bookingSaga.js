@@ -1,7 +1,7 @@
 /*
 =============================================================================
 MODULE: backend/booking/bookingSaga.js
-VERSION: v5009-FISCAL-V20.4-SAGA
+VERSION: v5009-FISCAL-V20.4-SAGA-SDKv2
 BASE: v5009-FISCAL-V20.2 + Afinado final contra BIBLIA v4
 SSOT: SSOT CONSOLIDADO v5002.6 | BIBLIA v5009-V20-FINAL-CONSOLIDATED-v4
 MISSION: Orquestador transaccional. Saga compensable para reservas simples
@@ -9,47 +9,14 @@ MISSION: Orquestador transaccional. Saga compensable para reservas simples
          idempotencia triple capa y creacion SECUENCIAL F1 -> F2.
 STANDARDS: G10 ASCII Strict (0 non-ASCII characters).
 
-FIXES APLICADOS v5009-FISCAL-V20.3:
-  - SAGA-01: skipAvailabilityValidation = false (BIBLIA 2.2 regla 7:
-             "no desactivar nativo"). Wix re-valida disponibilidad real.
-  - SAGA-02: pairToken UNIFICADO. Prioridad absoluta al token emitido por
-             reservas.web.getCertifiedDualSlots. Fallback dual determinista
-             con la MISMA huella (_buildPairFingerprint, unica definicion en
-             bookingUtils y reexportada por bookingCore; sin copia local).
-             Fallback simple por _resolveStablePairToken.
-  - SAGA-03: OWNER_BUSINESS GARANTIZADO. Resolucion de locationId con
-             cascada (slot validado -> catalogo) + _assertPristineSlotContract
-             que BLOQUEA la creacion si el slot no cumple BIBLIA 2.2.1.
-  - SAGA-04: Addons inyectados (addOnIds) en bookedEntity.slot de F1 y F2,
-             con validacion de limite BIBLIA 3.2 (MAX_POR_RESERVA = 5).
-  - SAGA-05: PAYMENT_STATUS.NOT_PAID en confirmOrDecline (sin literales).
-  - SAGA-06: Compensacion NO cancela reservas CONFIRMED/CANCELLED/REFUNDED.
-             Compara contra enum nativo Wix Y valor SSOT espanol (BIBLIA
-             3.2.1: CONFIRMED -> CONFIRMADO, CANCELLED -> CANCELADO).
-  - SAGA-07: Constantes de configuracion V20 canonicas (BIBLIA 3.2.1
-             f13/f15/f16: MS_TTL_MUTEX, MS_LATIDO, MINUTOS_MAX_HUECO_DUAL).
-             v5010.4 FASE 2: cascadas legacy eliminadas; internalConfig ya
-             solo expone los nombres V20.
-  - SAGA-08: availableStaff se lee exclusivamente desde el campo canónico.
-  - SAGA-09: selectedPaymentOption ONLINE en create cuando path eCom.
-
-NOTA CONTRACTUAL (BIBLIA 2.2.1):
-  bookedEntity.slot.serviceId      -> GUID servicio
-  bookedEntity.slot.scheduleId     -> GUID schedule (obligatorio)
-  bookedEntity.slot.startDate      -> ISO UTC con Z
-  bookedEntity.slot.endDate        -> ISO UTC con Z
-  bookedEntity.slot.timezone       -> Europe/Madrid
-  bookedEntity.slot.resource.id    -> GUID recurso
-  bookedEntity.slot.location       -> { id, locationType: OWNER_BUSINESS }
-  contactDetails                   -> objeto contacto
-  totalParticipants                -> 1
+FIXES APLICADOS SDK v2:
+  - Eliminado { suppressAuth: true } de cancelBookingElevated en 
+    _compensateCreatedBookings. La función ya está elevada en bookingCore.
 =============================================================================
 */
 
 import { bookings } from "@wix/bookings";
 import { auth } from "@wix/essentials";
-// EXCEPCION DATA API (APENDICE C de la BIBLIA): persistencia CMS server-side
-// con suppressAuth/suppressHooks; ver apendice antes de proponer migracion.
 import wixData from "backend/dataClient";
 
 import {
@@ -108,10 +75,6 @@ import {
     normalizeError,
     ERROR_CODES,
     _extractCheckoutId,
-    // v5010.4 (FASE 2 / CORE-05): huella canonica UNICA (definida en
-    // bookingUtils, reexportada por bookingCore). SAGA-02 la consume para
-    // que el token FINGERPRINT coincida 1:1 con el emitido por
-    // reservas.web._getCertifiedDualSlotsInternal. Sin copia local.
     _buildPairFingerprint,
 } from "backend/booking/bookingCore";
 
@@ -127,22 +90,16 @@ import {
 const log = logger;
 
 // =============================================================================
-// CONSTANTES (SAGA-07: tolerantes al renombrado V20, BIBLIA 3.2.1)
+// CONSTANTES
 // =============================================================================
 
-// v5010.4 (FASE 2): SSOT renombrado a V20 (BIBLIA 3.2.1 f15/f16); cascada
-// legacy eliminada porque internalConfig ya no expone los nombres ingleses.
 const LOCKTTLMS = Number(CONCURRENCY?.MS_TTL_MUTEX) || 300000;
-
 const HEARTBEATMS = Number(CONCURRENCY?.MS_LATIDO) || 15000;
 
 const CITASCOL = BUSINESS_COLLECTIONS.CITAS_F2;
 const SERVICIOSCOL = BUSINESS_COLLECTIONS.SERVICIOS_CATALOGO;
-// FASE4 (ADR-05): CompensacionesPendientes absorbida en ControlOperativo.
 const COMPENSACIONESCOL = OPERATIONAL_COLLECTIONS.CONTROL_OPERATIVO;
 
-// v5010.4 (FASE 2): clave V20 segun BIBLIA 3.2.1 f13; cascada legacy
-// eliminada (internalConfig ya no expone MAX_DUAL_GAP_MINUTES).
 const MINUTOS_MAX_HUECO_DUAL = Math.max(
     0,
     Number(SLOT_SEARCH?.MINUTOS_MAX_HUECO_DUAL) || 120
@@ -155,13 +112,9 @@ const CHECKOUT_TIMEOUT_MS =
 const API_TIMEOUT_MS =
     Number(SDK_CONFIG?.TIMEOUTS?.API_MS) || 15000;
 
-// BIBLIA 3.2 fila 10: BOOKINGS_ADDON_CONFIG.MAX_POR_RESERVA = 5
 const MAX_ADDONS_PER_BOOKING = 5;
-
-// SAGA-01: BIBLIA 2.2 regla 7 -> no desactivar la validacion nativa de Wix.
 const SKIP_AVAILABILITY_VALIDATION = false;
 
-// SAGA-05: SSOT = Wix native EN enums only (no ES cascade).
 const PAYMENT_STATUS_NOT_PAID = _safeTrim(PAYMENT_STATUS.NOT_PAID);
 const PAYMENT_STATUS_PENDING = _safeTrim(PAYMENT_STATUS.PENDING_PAYMENT);
 const BOOKING_STATUS_CONFIRMED = _safeTrim(BOOKING_STATUS.CONFIRMED);
@@ -169,7 +122,6 @@ const BOOKING_STATUS_PENDING_PAYMENT = _safeTrim(
     BOOKING_STATUS.PENDING || BOOKING_STATUS.PENDING_PAYMENT
 );
 
-// SAGA-06: non-cancelable = Wix native booking statuses only.
 const NON_CANCELABLE_STATUSES = new Set(
     [
         BOOKING_STATUS.CONFIRMED,
@@ -184,14 +136,8 @@ const NON_CANCELABLE_STATUSES = new Set(
 );
 
 // =============================================================================
-// BLOCK 1 - PAIR TOKEN UNIFICADO (SAGA-02)
+// BLOCK 1 - PAIR TOKEN UNIFICADO
 // =============================================================================
-
-// v5010.4 (FASE 2): la copia local de _buildPairFingerprint fue ELIMINADA.
-// Unica fuente de verdad: bookingUtils._buildPairFingerprint, consumida aqui
-// via re-export de bookingCore (ver import arriba). Esto elimina el riesgo
-// normativo de divergencia silenciosa de huella entre saga y disponibilidad
-// (CORE-05 / SAGA-02).
 
 function _resolveStablePairToken({ serviceId, resourceId, f1Start, f2Start, email }) {
     const emailHash = _hashKey(_safeTrim(email).toLowerCase());
@@ -205,16 +151,6 @@ function _resolveStablePairToken({ serviceId, resourceId, f1Start, f2Start, emai
     return "pt_" + hash.slice(0, 32);
 }
 
-/**
- * SAGA-02: Resolucion unificada de pairToken.
- *
- * Prioridad:
- *   1. SUPPLIED       -> token emitido por getCertifiedDualSlots / frontend.
- *                        Es la unica via que garantiza correlacion exacta.
- *   2. FINGERPRINT    -> dual con resourceId explicito: misma huella que
- *                        reservas.web, por lo que el token coincide.
- *   3. STABLE         -> simple, o dual sin resourceId (degradado, con warn).
- */
 function _resolveUnifiedPairToken({
     suppliedPairToken,
     isDual,
@@ -315,7 +251,7 @@ async function _bestEffortUnlockAll(lockKeys, lockOwnerId) {
 }
 
 // =============================================================================
-// BLOCK 4 - BOOKING COMPENSATION (SAGA-06)
+// BLOCK 4 - BOOKING COMPENSATION
 // =============================================================================
 
 async function _compensateCreatedBookings(createdBookings, traceId) {
@@ -323,12 +259,8 @@ async function _compensateCreatedBookings(createdBookings, traceId) {
         const bookingId = booking?.bookingId || booking?.id;
         if (!bookingId) continue;
 
-        // FASE2 (ADR-06): lectura canonica bookingStatus PRIMERO; el legado
-        // "status" queda como fallback de LECTURA transitorio (EOL 31/12/2026).
         const status = _safeTrim(booking?.[BOOKING_FIELDS.STATUS] || booking?.status).toUpperCase();
 
-        // SAGA-06: nunca cancelar una reserva ya confirmada, cancelada o
-        // reembolsada. Cancelar un CONFIRMED genera descuadre fiscal y de caja.
         if (status && NON_CANCELABLE_STATUSES.has(status)) {
             log.warn("Skipping compensation for non-cancelable booking", {
                 bookingId: bookingId,
@@ -343,7 +275,8 @@ async function _compensateCreatedBookings(createdBookings, traceId) {
             await _executeWithRetry(
                 () =>
                 withTimeout(
-                    () => cancelBookingElevated(bookingId, { suppressAuth: true }),
+                    // SDK v2: cancelBookingElevated ya está elevada, no necesita suppressAuth
+                    () => cancelBookingElevated(bookingId),
                     API_TIMEOUT_MS,
                     "cancelBookingCompensation"
                 ),
@@ -371,9 +304,6 @@ async function _compensateCreatedBookings(createdBookings, traceId) {
                         status: COMPENSATION_STATUS.PENDING,
                         compensationStatus: COMPENSATION_STATUS.PENDING,
                         attempts: 0,
-                        // v5010.7 SSOT: solo campos canonicos internos.
-                        // Alias legacy amount/concept eliminados (cero
-                        // lectores verificados por grep en src/).
                         totalAmount: 0,
                         paymentMethod: null,
                         transactionId: null,
@@ -400,7 +330,7 @@ async function _compensateCreatedBookings(createdBookings, traceId) {
 }
 
 // =============================================================================
-// BLOCK 5 - SELECTIVE ELEVATION + TIMEOUT (FIX-37)
+// BLOCK 5 - SELECTIVE ELEVATION + TIMEOUT
 // =============================================================================
 
 async function _createBookingWithSelectiveElevation(booking, options, traceId) {
@@ -428,7 +358,7 @@ async function _createBookingWithSelectiveElevation(booking, options, traceId) {
 }
 
 // =============================================================================
-// BLOCK 6 - VALIDACION DEFENSIVA DE RESPUESTA (FIX-42)
+// BLOCK 6 - VALIDACION DEFENSIVA DE RESPUESTA
 // =============================================================================
 
 function _validateCreateBookingResponse(booking, phase, traceId) {
@@ -467,7 +397,7 @@ function _validateCreateBookingResponse(booking, phase, traceId) {
 }
 
 // =============================================================================
-// BLOCK 7 - DETECCION DE FLAG DOUBLEBOOKED (FIX-38)
+// BLOCK 7 - DETECCION DE FLAG DOUBLEBOOKED
 // =============================================================================
 
 function _checkDoubleBookingFlag(booking, phase, traceId) {
@@ -483,7 +413,7 @@ function _checkDoubleBookingFlag(booking, phase, traceId) {
 }
 
 // =============================================================================
-// BLOCK 8 - VALIDACION EXPLICITA DE GAP MAXIMO (FIX-34)
+// BLOCK 8 - VALIDACION EXPLICITA DE GAP MAXIMO
 // =============================================================================
 
 function _validateDualGap(f1LocalEnd, f2LocalStart, traceId) {
@@ -532,7 +462,7 @@ function _validateDualGap(f1LocalEnd, f2LocalStart, traceId) {
 }
 
 // =============================================================================
-// BLOCK 9 - VALIDACION DEL SERVICIO F2 (FIX-32, FIX-36, SAGA-08)
+// BLOCK 9 - VALIDACION DEL SERVICIO F2
 // =============================================================================
 
 async function _validateLinkedPhaseService(linkedPhases, parentLocationId, traceId) {
@@ -559,8 +489,6 @@ async function _validateLinkedPhaseService(linkedPhases, parentLocationId, trace
         );
     }
 
-    // BIBLIA 4.3 fila 20 + v5010.7 CERO LEGACY: unico campo canonic del
-    // catalogo V20 es clientHidden. Aliases hidden/hiddenCliente eliminados.
     const isHidden = service.clientHidden === true;
 
     if (isHidden) {
@@ -660,7 +588,7 @@ async function _deleteCitasByPairToken(pairToken, traceId) {
 }
 
 // =============================================================================
-// BLOCK 11 - ADDONS (FIX-35 + SAGA-04)
+// BLOCK 11 - ADDONS
 // =============================================================================
 
 function _detectAddons(unsafePayload, metaCita, serviceConfig, traceId) {
@@ -680,7 +608,6 @@ function _detectAddons(unsafePayload, metaCita, serviceConfig, traceId) {
 
     const unique = Array.from(new Set(requested));
 
-    // SAGA-04: limite BIBLIA 3.2 fila 10 (MAX_POR_RESERVA = 5).
     if (unique.length > MAX_ADDONS_PER_BOOKING) {
         throw createBookingError(
             ERROR_CODES.INVALID_PAYLOAD,
@@ -689,7 +616,6 @@ function _detectAddons(unsafePayload, metaCita, serviceConfig, traceId) {
         );
     }
 
-    // Solo se envian a Wix los addOnOptions que existen en el catalogo del servicio.
     const catalogAddons = Array.isArray(serviceConfig?.metadata?.addOnOptions) ?
         serviceConfig.metadata.addOnOptions :
         [];
@@ -728,11 +654,6 @@ function _detectAddons(unsafePayload, metaCita, serviceConfig, traceId) {
     return validated;
 }
 
-/**
- * SAGA-04: campos de addon a fusionar en el slot antes de _forceStaffInPristineSlot.
- * Se exponen ambas claves porque el contrato del Writer V2 ha usado
- * historicamente addOnIds y selectedAddOns.
- */
 function _buildAddonSlotFields(addOnIds) {
     if (!Array.isArray(addOnIds) || addOnIds.length === 0) return {};
     return {
@@ -742,23 +663,9 @@ function _buildAddonSlotFields(addOnIds) {
 }
 
 // =============================================================================
-// BLOCK 12 - UBICACION OWNER_BUSINESS (SAGA-03)
+// BLOCK 12 - UBICACION OWNER_BUSINESS
 // =============================================================================
 
-/**
- * SAGA-03: resuelve la ubicacion del booking forzando OWNER_BUSINESS.
- *
- * BIBLIA 2.2.1 fila 8 exige bookedEntity.slot.location.locationType =
- * OWNER_BUSINESS en creacion. La consulta de disponibilidad usa BUSINESS
- * (reservas.web.LOCATION_TS); la creacion usa OWNER_BUSINESS
- * (reservas.web.LOCATION_BOOKING). Aqui se garantiza el segundo.
- *
- * Cascada de resolucion del id:
- *   1. slot F1 validado (lo devolvio Wix)
- *   2. slot F2 validado
- *   3. catalogo del servicio (serviceConfig.locationId)
- *   4. parentLocationId resuelto en fase 0
- */
 function _resolveBookingLocation({
     validatedSlotF1,
     validatedSlotF2,
@@ -798,11 +705,6 @@ function _resolveBookingLocation({
     });
 }
 
-/**
- * SAGA-03: guard contractual. Bloquea la creacion si el pristine slot no
- * cumple BIBLIA 2.2.1. Fallar aqui es barato; fallar en Wix deja reservas
- * huerfanas que requieren compensacion.
- */
 function _assertPristineSlotContract(pristineSlot, phase, traceId) {
     const startIso = _safeTrim(pristineSlot?.startDate);
     const endIso = _safeTrim(pristineSlot?.endDate);
@@ -998,7 +900,6 @@ export async function executeBookingSaga(unsafePayload) {
             _validateDualGap(f1LocalEnd, f2LocalStart, traceId);
         }
 
-        // SAGA-04: addOnOptions detectados y validados contra catalogo del servicio.
         const detectedAddonIds = _detectAddons(
             unsafePayload,
             metaCita,
@@ -1009,9 +910,6 @@ export async function executeBookingSaga(unsafePayload) {
 
         // =========================================================================
         // PHASE 1: REAL-TIME REVALIDATION
-        // Se ejecuta ANTES de resolver el pairToken definitivo porque la huella
-        // dual (SAGA-02) necesita el resourceId final balanceado por el backend
-        // de disponibilidad, que solo se conoce tras la revalidacion.
         // =========================================================================
         const resourceValidation = await _resolveStaffForSlotInternal({
             serviceId: serviceId,
@@ -1050,7 +948,7 @@ export async function executeBookingSaga(unsafePayload) {
         }
 
         // =========================================================================
-        // PHASE 2: PAIR TOKEN UNIFICADO (SAGA-02)
+        // PHASE 2: PAIR TOKEN UNIFICADO
         // =========================================================================
         const tokenResolution = _resolveUnifiedPairToken({
             suppliedPairToken: unsafePayload?.pairToken || metaCita.pairToken,
@@ -1075,7 +973,6 @@ export async function executeBookingSaga(unsafePayload) {
             pairToken: pairToken,
         });
 
-        // SAGA-03: ubicacion OWNER_BUSINESS garantizada para la creacion.
         const bookingLocation = _resolveBookingLocation({
             validatedSlotF1: validatedSlotF1,
             validatedSlotF2: validatedSlotF2,
@@ -1241,9 +1138,6 @@ export async function executeBookingSaga(unsafePayload) {
 
         // =========================================================================
         // CREACION SECUENCIAL F1 -> F2
-        // SAGA-01: skipAvailabilityValidation = false
-        // SAGA-03: location OWNER_BUSINESS + guard de contrato
-        // SAGA-04: addOnIds inyectados
         // =========================================================================
         saga.addStep(
             "CreateBookings",
@@ -1259,7 +1153,6 @@ export async function executeBookingSaga(unsafePayload) {
                         phone: _safeTrim(unsafePayload?.phone || metaCita.phone || ""),
                     };
 
-                    // SAGA-01: opciones unicas para ambas fases.
                     const bookingOptions = Object.freeze({
                         flowControlSettings: Object.freeze({
                             skipAvailabilityValidation: SKIP_AVAILABILITY_VALIDATION,
@@ -1289,9 +1182,6 @@ export async function executeBookingSaga(unsafePayload) {
                         );
                     }
 
-                    // SAGA-03: el pristine slot puede haber perdido la ubicacion
-                    // si _forceStaffInPristineSlot reconstruye el objeto. Se
-                    // re-aplica y se valida el contrato BIBLIA 2.2.1.
                     pristineF1.location = bookingLocation;
                     _assertPristineSlotContract(pristineF1, "F1", traceId);
 
@@ -1398,7 +1288,6 @@ export async function executeBookingSaga(unsafePayload) {
 
         // =========================================================================
         // CHECKOUT ONLINE / CONFIRMACION PRESENCIAL
-        // SAGA-05: PAYMENT_STATUS.NOT_PAID (sin literales)
         // =========================================================================
         const paymentMethod = _safeTrim(
             unsafePayload?.paymentMethod || metaCita.paymentMethod || "PRESENCIAL"
@@ -1462,7 +1351,6 @@ export async function executeBookingSaga(unsafePayload) {
                             withTimeout(
                                 () =>
                                 confirmOrDeclineBookingElevated(booking.bookingId, {
-                                    // SAGA-05: constante SSOT, nunca literal.
                                     paymentStatus: PAYMENT_STATUS_NOT_PAID,
                                 }),
                                 API_TIMEOUT_MS,
@@ -1477,11 +1365,6 @@ export async function executeBookingSaga(unsafePayload) {
                             traceId
                         );
 
-                        // SAGA-06: tras confirmar, el booking pasa a CONFIRMED y ya
-                        // no es cancelable. Se actualiza el estado local para que la
-                        // compensacion posterior lo respete.
-                        // FASE2 (ADR-06): se escribe en bookingStatus (canonico);
-                        // el setter legado "status" queda eliminado del objeto local.
                         booking.bookingStatus =
                             _safeTrim(confirmResult?.booking?.bookingStatus) ||
                             _safeTrim(confirmResult?.booking?.status) ||
@@ -1509,7 +1392,7 @@ export async function executeBookingSaga(unsafePayload) {
             BOOKING_STATUS_CONFIRMED;
 
         // =========================================================================
-        // PERSISTENCIA EN CitasF2 (BIBLIA 4.6)
+        // PERSISTENCIA EN CitasF2
         // =========================================================================
         saga.addStep(
             "PersistCitas",
