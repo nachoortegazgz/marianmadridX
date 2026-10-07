@@ -24,7 +24,7 @@ CORRECTIONS (heredadas v5007.0):
 */
 
 import { webMethod, Permissions } from "wix-web-module";
-import wixData from "wix-data";
+import wixData from "backend/dataClient";
 import { currentMember } from "wix-members-backend";
 
 import {

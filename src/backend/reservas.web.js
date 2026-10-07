@@ -21,7 +21,7 @@
  */
 
 import { webMethod, Permissions } from "wix-web-module";
-import wixData from "wix-data";
+import wixData from "backend/dataClient";
 import { availabilityTimeSlots } from "@wix/bookings";
 
 import {

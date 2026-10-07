@@ -25,7 +25,7 @@ FIXES APLICADOS v5009-FISCAL (heredados):
 */
 
 import { webMethod, Permissions } from "wix-web-module";
-import wixData from "wix-data";
+import wixData from "backend/dataClient";
 import { getSecret } from "wix-secrets-backend";
 
 import {
@@ -381,7 +381,7 @@ async function _getLastMovement() {
         .query(BUSINESS_COLLECTIONS.MOVIMIENTOS_CAJA)
         .descending("sequenceNumber")
         .limit(1)
-        .find({ suppressAuth: true, consistentRead: true });
+        .find({ suppressAuth: true, consistencyMode: "strong" });
     return res?.items?.[0] || null;
 }
 
@@ -579,7 +579,7 @@ export const registerManualTransaction = webMethod(Permissions.SiteMember, async
                 .query(BUSINESS_COLLECTIONS.MOVIMIENTOS_CAJA)
                 .eq("transactionId", transactionId)
                 .limit(1)
-                .find({ suppressAuth: true, consistentRead: true });
+                .find({ suppressAuth: true, consistencyMode: "strong" });
 
             if (existingRes?.items?.length > 0) {
                 log.info("Ledger idempotent duplicate detected", { transactionId, traceId });
@@ -1217,7 +1217,7 @@ export const registerGiftCardSale = webMethod(Permissions.SiteMember, async (pay
             .query(BUSINESS_COLLECTIONS.MOVIMIENTOS_CAJA)
             .eq("transactionId", `GC_SALE-${giftCardId}`)
             .limit(1)
-            .find({ suppressAuth: true, consistentRead: true });
+            .find({ suppressAuth: true, consistencyMode: "strong" });
 
         if (existingRes?.items?.length > 0) {
             return { status: "SUCCESS", data: existingRes.items[0], error: null, idempotent: true };
@@ -1365,7 +1365,7 @@ export const registerGiftCardRedemption = webMethod(Permissions.SiteMember, asyn
             .query(BUSINESS_COLLECTIONS.MOVIMIENTOS_CAJA)
             .eq("transactionId", redemptionId)
             .limit(1)
-            .find({ suppressAuth: true, consistentRead: true });
+            .find({ suppressAuth: true, consistencyMode: "strong" });
 
         if (existingRedemption?.items?.length > 0) {
             log.info("Gift card redemption idempotent duplicate detected", { redemptionId, giftCardId, traceId });

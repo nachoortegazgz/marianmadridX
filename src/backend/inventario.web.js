@@ -38,7 +38,7 @@ CORRECTIONS (heredadas v5007.4):
 */
 
 import { webMethod, Permissions } from "wix-web-module";
-import wixData from "wix-data";
+import wixData from "backend/dataClient";
 
 import {
   BUSINESS_COLLECTIONS, OPERATIONAL_COLLECTIONS,

@@ -28,7 +28,7 @@ FIXES APLICADOS v5009-FISCAL (heredados):
 */
 
 import { webMethod, Permissions } from "wix-web-module";
-import wixData from "wix-data";
+import wixData from "backend/dataClient";
 
 import {
     BUSINESS_COLLECTIONS,
@@ -221,12 +221,12 @@ export async function _getNextSequenceInternal(traceId) {
 
     try {
         let seqDoc = await wixData
-            .get(BUSINESS_COLLECTIONS.CAJA_ACTUAL, CASH_SEQ_ID, { suppressAuth: true, consistentRead: true })
+            .get(BUSINESS_COLLECTIONS.CAJA_ACTUAL, CASH_SEQ_ID, { suppressAuth: true, consistencyMode: "strong" })
             .catch(() => null);
 
         if (!seqDoc) {
             const legacyCashRegister = await wixData
-                .get(BUSINESS_COLLECTIONS.CAJA_ACTUAL, CASH_REGISTER_ID, { suppressAuth: true, consistentRead: true })
+                .get(BUSINESS_COLLECTIONS.CAJA_ACTUAL, CASH_REGISTER_ID, { suppressAuth: true, consistencyMode: "strong" })
                 .catch(() => null);
 
             const legacyCounters =
@@ -249,7 +249,7 @@ export async function _getNextSequenceInternal(traceId) {
                     const msg = String(insertErr?.message || "");
                     if (msg.includes("WDE0123") || msg.includes("WD_ITEM_ALREADY_EXISTS") || msg.includes("Duplicated")) {
                         seqDoc = await wixData
-                            .get(BUSINESS_COLLECTIONS.CAJA_ACTUAL, CASH_SEQ_ID, { suppressAuth: true, consistentRead: true })
+                            .get(BUSINESS_COLLECTIONS.CAJA_ACTUAL, CASH_SEQ_ID, { suppressAuth: true, consistencyMode: "strong" })
                             .catch(() => null);
                         if (!seqDoc) throw insertErr;
                     } else {
@@ -284,7 +284,7 @@ async function _getLastCashEvent() {
         .query(BUSINESS_COLLECTIONS.MOVIMIENTOS_CAJA)
         .descending("sequenceNumber")
         .limit(1)
-        .find({ suppressAuth: true, consistentRead: true });
+        .find({ suppressAuth: true, consistencyMode: "strong" });
     return res?.items?.[0] || null;
 }
 

@@ -26,7 +26,7 @@ FIXES APLICADOS v5007.8 (heredados):
 =============================================================================
 */
 
-import wixData from "wix-data";
+import wixData from "backend/dataClient";
 import { getSecret } from "wix-secrets-backend";
 import {
     BUSINESS_COLLECTIONS,
@@ -321,14 +321,14 @@ async function _getExisting(journalEntryId) {
         .eq("journalEntryId", journalEntryId)
         .eq("recordType", "ACCOUNTING_LINE")
         .limit(1)
-        .find({ suppressAuth: true, consistentRead: true })
+        .find({ suppressAuth: true, consistencyMode: "strong" })
         .catch(() => null);
     return res?.items?.[0] || null;
 }
 
 async function _insertLineIfMissing(line) {
     const existing = await wixData
-        .get(BUSINESS_COLLECTIONS.LIBRO_ASIENTOS_CONTABLES_DETALLE, line._id, { suppressAuth: true, consistentRead: true })
+        .get(BUSINESS_COLLECTIONS.LIBRO_ASIENTOS_CONTABLES_DETALLE, line._id, { suppressAuth: true, consistencyMode: "strong" })
         .catch(() => null);
 
     if (existing) return { idempotent: true, item: existing };

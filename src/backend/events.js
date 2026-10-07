@@ -24,7 +24,7 @@ FIXES APLICADOS v5009-FISCAL (heredados):
 =============================================================================
 */
 
-import wixData from "wix-data";
+import wixData from "backend/dataClient";
 import { createClient } from "@wix/sdk";
 import { getSecret } from "wix-secrets-backend";
 
@@ -511,7 +511,7 @@ export async function wixBookingsV2_onBookingCanceled(rawBody) {
                 .eq("linkedBookingIds", bookingId)
                 .eq("movementType", MOVEMENT_TYPE.VENTA_ONLINE)
                 .limit(1)
-                .find({ suppressAuth: true, consistentRead: true })
+                .find({ suppressAuth: true, consistencyMode: "strong" })
                 .catch(() => ({ items: [] }));
 
             const originalMovement = originalMovementRes?.items?.[0];
@@ -643,7 +643,7 @@ export async function wixEcom_onOrderPaymentStatusUpdated(rawBody) {
             wixData.query(BUSINESS_COLLECTIONS.MOVIMIENTOS_CAJA)
                 .eq("transactionId", transactionId)
                 .limit(1)
-                .find({ suppressAuth: true, consistentRead: true }),
+                .find({ suppressAuth: true, consistencyMode: "strong" }),
             API_TIMEOUT_MS,
             "checkExistingLedgerPreflight"
         ).catch(() => ({ items: [] }));
@@ -884,7 +884,7 @@ export async function wixEcom_onOrderRefunded(rawBody) {
             wixData.query(BUSINESS_COLLECTIONS.MOVIMIENTOS_CAJA)
                 .eq("transactionId", originalTransactionId)
                 .limit(1)
-                .find({ suppressAuth: true, consistentRead: true }),
+                .find({ suppressAuth: true, consistencyMode: "strong" }),
             API_TIMEOUT_MS,
             "queryOriginalMovement"
         ).catch(() => ({ items: [] }));
@@ -1059,7 +1059,7 @@ export async function wixEcom_onOrderRefunded(rawBody) {
                 .eq("orderId", orderId)
                 .eq("movementType", MOVEMENT_TYPE.REEMBOLSO)
                 .limit(100)
-                .find({ suppressAuth: true, consistentRead: true }),
+                .find({ suppressAuth: true, consistencyMode: "strong" }),
             API_TIMEOUT_MS,
             "queryRefundsForOrder"
         );

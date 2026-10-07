@@ -20,7 +20,7 @@ FIXES APLICADOS v5009-FISCAL-V20.1:
 */
 
 import { webMethod, Permissions } from "wix-web-module";
-import wixData from "wix-data";
+import wixData from "backend/dataClient";
 
 import {
   BUSINESS_COLLECTIONS,
@@ -255,7 +255,7 @@ async function _fetchQuarterMovements(months, options = {}) {
     .limit(pageSize);
 
   let res = await withTimeout(
-    query.find({ suppressAuth: true, consistentRead: false }),
+    query.find({ suppressAuth: true, consistencyMode: "eventual" }),
     CMS_TIMEOUT_MS,
     "fetchQuarterMovements:p1"
   );
@@ -266,7 +266,7 @@ async function _fetchQuarterMovements(months, options = {}) {
   let reachedMaxPages = false;
   while (res && res.hasNext() && page <= limit) {
     res = await withTimeout(
-      res.next({ suppressAuth: true, consistentRead: false }),
+      res.next({ suppressAuth: true, consistencyMode: "eventual" }),
       CMS_TIMEOUT_MS,
       `fetchQuarterMovements:p${page}`
     );

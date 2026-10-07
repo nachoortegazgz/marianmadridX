@@ -22,7 +22,7 @@ FIXES APLICADOS v5009-FISCAL (heredados):
 =============================================================================
 */
 
-import wixData from "wix-data";
+import wixData from "backend/dataClient";
 
 import {
     BUSINESS_COLLECTIONS,
