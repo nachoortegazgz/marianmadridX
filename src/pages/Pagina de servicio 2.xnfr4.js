@@ -1,7 +1,7 @@
 /*
 =============================================================================
 MODULE: pages/servicio-2.js
-VERSION: v5011-SERVICE-CATALOG-CANONICAL
+VERSION: v5012-SERVICE-CATALOG-CLEAN
 =============================================================================
 */
 
@@ -17,6 +17,13 @@ import {
 } from "public/mmUtils";
 import { createWidgetBridge } from "public/widgetBridge";
 
+const EXCLUDED_PATHS = new Set([
+  "servicios",
+  "service",
+  "servicio",
+  "servicio-2"
+]);
+
 let bridge = null;
 let resolvedService = null;
 
@@ -29,22 +36,15 @@ function getSafeMessage(error, fallback) {
 }
 
 function showError(message) {
-  const safeMessage = text(
-    message,
-    "No se pudo cargar el servicio."
-  );
+  const safeMessage = text(message, "No se pudo cargar el servicio.");
 
   console.error("[servicio-2] Error:", safeMessage);
 
   try {
     const banner = $w("#errorBanner");
-
-    if (!banner) {
-      return;
-    }
+    if (!banner) return;
 
     banner.text = `Error: ${safeMessage}`;
-
     if (typeof banner.show === "function") {
       banner.show();
     }
@@ -57,49 +57,37 @@ function showError(message) {
 }
 
 function getMessageType(message) {
-  if (!message || typeof message !== "object") {
-    return "";
-  }
-
-  return text(
-    message.type || message.action
-  ).toUpperCase();
+  if (!message || typeof message !== "object") return "";
+  return text(message.type || message.action).toUpperCase();
 }
 
 function getPayload(message) {
-  if (
-    !message ||
-    typeof message !== "object" ||
-    !message.payload ||
-    typeof message.payload !== "object" ||
-    Array.isArray(message.payload)
-  ) {
+  const payload = message?.payload;
+
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
     return {};
   }
 
-  return message.payload;
+  return payload;
 }
 
 function getReferenceId(value) {
-  if (!value) {
-    return "";
-  }
-
   if (typeof value === "string") {
     return text(value);
   }
 
-  if (typeof value === "object") {
-    return text(
-      value.serviceId ||
-      value.addOnId ||
-      value.nativeId ||
-      value.id ||
-      value.value
-    );
+  if (!value || typeof value !== "object") {
+    return "";
   }
 
-  return "";
+  return text(
+    value.serviceId ||
+    value.addOnId ||
+    value.nativeId ||
+    value._id ||
+    value.id ||
+    value.value
+  );
 }
 
 function getServiceId(service) {
@@ -111,21 +99,20 @@ function getServiceSlug(service) {
 }
 
 function getLinkedPhaseId(value) {
-  if (Array.isArray(value)) {
-    return getReferenceId(value[0]);
-  }
-
-  return getReferenceId(value);
+  return getReferenceId(Array.isArray(value) ? value[0] : value);
 }
 
 function getAddOnOptions(service) {
-  return Array.isArray(service?.addOnOptions)
-    ? service.addOnOptions
-    : [];
+  return Array.isArray(service?.addOnOptions) ? service.addOnOptions : [];
+}
+
+function toFiniteNumber(value, fallback = 0) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
 }
 
 function normalizeService(data) {
-  if (!data || typeof data !== "object") {
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
     throw new Error("El servicio recibido no es válido.");
   }
 
@@ -133,15 +120,11 @@ function normalizeService(data) {
   const slug = getServiceSlug(data);
 
   if (!_looksLikeGuid(serviceId)) {
-    throw new Error(
-      "El servicio no tiene un serviceId válido."
-    );
+    throw new Error("El servicio no tiene un serviceId válido.");
   }
 
   if (!slug) {
-    throw new Error(
-      "El servicio no tiene un slug válido."
-    );
+    throw new Error("El servicio no tiene un slug válido.");
   }
 
   return {
@@ -150,8 +133,8 @@ function normalizeService(data) {
     title: text(data.title),
     description: text(data.description),
     location: text(data.location),
-    totalDuration: Number(data.totalDuration || 0),
-    price: Number(data.price || 0),
+    totalDuration: toFiniteNumber(data.totalDuration),
+    price: toFiniteNumber(data.price),
     mainMedia: text(data.mainMedia),
     addOnOptions: getAddOnOptions(data),
     linkedPhases: getLinkedPhaseId(data.linkedPhases),
@@ -163,38 +146,18 @@ function normalizeService(data) {
   };
 }
 
-async function resolveServiceLookup() {
+function resolveServiceLookup() {
   const query = wixLocation.query || {};
 
-  const candidates = [
-    query.slug,
-    query.serviceId
-  ];
-
-  for (const candidate of candidates) {
+  for (const candidate of [query.slug, query.serviceId]) {
     const value = _safeSlugOrId(candidate);
-
-    if (value) {
-      return value;
-    }
+    if (value) return value;
   }
 
-  const path = Array.isArray(wixLocation.path)
-    ? wixLocation.path
-    : [];
+  const path = Array.isArray(wixLocation.path) ? wixLocation.path : [];
+  const value = _safeSlugOrId(path[path.length - 1] || "");
 
-  const value = _safeSlugOrId(
-    path[path.length - 1] || ""
-  );
-
-  const excludedPaths = new Set([
-    "servicios",
-    "service",
-    "servicio",
-    "servicio-2"
-  ]);
-
-  if (!value || excludedPaths.has(value)) {
+  if (!value || EXCLUDED_PATHS.has(value)) {
     return null;
   }
 
@@ -202,17 +165,15 @@ async function resolveServiceLookup() {
 }
 
 function getAddOnIds(payload) {
-  if (!payload || !Array.isArray(payload.addOnIds)) {
-    return [];
-  }
+  if (!Array.isArray(payload?.addOnIds)) return [];
 
-  return Array.from(
-    new Set(
+  return [
+    ...new Set(
       payload.addOnIds
-        .map((addOn) => getReferenceId(addOn))
+        .map(getReferenceId)
         .filter(Boolean)
     )
-  ).slice(0, 21);
+  ].slice(0, 21);
 }
 
 function buildBookingUrl(service, payload) {
@@ -221,42 +182,34 @@ function buildBookingUrl(service, payload) {
     "/booking-calendar/calendario-2"
   );
 
-  const query = [
-    `slug=${encodeURIComponent(getServiceSlug(service))}`,
-    `serviceId=${encodeURIComponent(getServiceId(service))}`,
-    "referral=servicio-2"
-  ];
+  const query = new URLSearchParams({
+    slug: getServiceSlug(service),
+    serviceId: getServiceId(service),
+    referral: "servicio-2"
+  });
 
   const addOnIds = getAddOnIds(payload);
-
   if (addOnIds.length > 0) {
-    query.push(
-      `addOnIds=${encodeURIComponent(addOnIds.join(","))}`
-    );
+    query.set("addOnIds", addOnIds.join(","));
   }
 
-  return `${base}?${query.join("&")}`;
+  return `${base}?${query.toString()}`;
 }
 
 function getServicesUrl() {
-  return text(
-    URLS?.SERVICIOS,
-    "/reserva-online"
-  );
+  return text(URLS?.SERVICIOS, "/reserva-online");
 }
 
 async function loadService(lookupValue) {
   const result = await getServiceBySlugOrId(lookupValue);
 
   if (
-    !result ||
-    result.status !== "SUCCESS" ||
+    result?.status !== "SUCCESS" ||
     !result.data ||
     typeof result.data !== "object"
   ) {
     throw new Error(
-      result?.error?.message ||
-      "Servicio no encontrado."
+      result?.error?.message || "Servicio no encontrado."
     );
   }
 
@@ -267,7 +220,6 @@ $w.onReady(async () => {
   const traceId = makeTraceId("servicio");
 
   let widget;
-
   try {
     widget = $w("#htmlWidgetCustomService");
   } catch (error) {
@@ -285,12 +237,10 @@ $w.onReady(async () => {
   }
 
   try {
-    const lookupValue = await resolveServiceLookup();
+    const lookupValue = resolveServiceLookup();
 
     if (!lookupValue) {
-      showError(
-        "No se pudo localizar el servicio en la URL."
-      );
+      showError("No se pudo localizar el servicio en la URL.");
       return;
     }
 
@@ -316,24 +266,15 @@ $w.onReady(async () => {
         }
 
         if (type === MESSAGE_TYPES.BOOK) {
-          wixLocation.to(
-            buildBookingUrl(
-              resolvedService,
-              payload
-            )
-          );
+          wixLocation.to(buildBookingUrl(resolvedService, payload));
           return;
         }
 
         if (type === MESSAGE_TYPES.NAV) {
-          const target = text(
-            payload.target
-          ).toUpperCase();
-
+          const target = text(payload.target).toUpperCase();
           if (!target || target === "SERVICIOS") {
             wixLocation.to(getServicesUrl());
           }
-
           return;
         }
 
@@ -352,33 +293,24 @@ $w.onReady(async () => {
 
       onError: (error) => {
         showError(
-          getSafeMessage(
-            error,
-            "No se pudo cargar el servicio."
-          )
+          getSafeMessage(error, "No se pudo cargar el servicio.")
         );
       }
     });
 
     if (!bridge) {
-      showError(
-        "No se pudo inicializar el widget del servicio."
-      );
+      showError("No se pudo inicializar el widget del servicio.");
     }
   } catch (error) {
-    console.error(
-      "[servicio-2] Error de inicialización",
-      {
-        traceId,
-        message: error?.message
-      }
-    );
+    console.error("[servicio-2] Error de inicialización", {
+      traceId,
+      message: error?.message
+    });
 
     showError(
-      getSafeMessage(
-        error,
-        "No se pudo cargar el servicio."
-      )
+      getSafeMessage(error, "No se pudo cargar el servicio.")
     );
   }
 });
+
+**Importante:** este archivo aún normaliza `serviceId` como GUID y requiere `slug`. Si el contrato real garantiza el identificador mediante `_id`, o permite servicios sin slug, esa validación debe ajustarse junto con `getServiceBySlugOrId`; no conviene cambiarla a ciegas aquí.
