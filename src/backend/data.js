@@ -1,24 +1,21 @@
 /*
 =============================================================================
 MODULE: backend/data.js
-VERSION: v5009-FISCAL-V20.1
-BASE: v5009-FISCAL + Directriz V20 (IDs nativa en ingles)
-RESPONSIBILITY: Hooks de inmutabilidad y validacion para Wix Data.
-STANDARDS: G10 ASCII Strict.
+VERSION: v8.1-SSOT-MASTER
+BASE: BIBLIA v8.0-SSOT-MASTER + ANEXO SSOT v8.1 + cms.v8.1-FINAL.json
+RESPONSIBILITY: Hooks de inmutabilidad, validacion estructural y proteccion
+                de ledgers fiscales/laborales/contables.
+STANDARDS: G10 ASCII Strict. Validacion delegada en backend/validation.js.
 
-FIXES APLICADOS v5009-FISCAL-V20.1:
-  - V20-01: imports alineados a internalConfig V20.1.
-  - V20-02: hooks validan campos CMS V20.1 (ingles camelCase).
-  - V20-03: helpers _read* aceptan aliases legacy durante transicion.
-  - V20-04: mensajes de error se mantienen en espanol (operadores).
-  - V20-05: validaciones nuevas para fiscalRole, linkedAdvanceId,
-            vatAccrualStatus, bankReconciliationReference, isB2B,
-            issuerInvoiceNumber, correctionType, nonSubjectReason.
-
-FIXES APLICADOS v5009-FISCAL (heredados):
-  - FIX-50, FIX-51, FIX-65.
-  - D-01..D-13.
-  - FIX-FISCAL-04.
+CORRECTIONS APPLIED (ANEXO v8.1):
+  - C-01: Campo 'active' eliminado. Hooks no lo referencian.
+  - C-02: MapaStaff valida rolBookings + rolWebsite (no staffRole).
+  - C-03: MapaStaff/DatosFiscales usan memberId (no staffMemberId).
+  - C-04: RegistrosHorariosStaff usa memberId.
+  - C-05: ServiciosCatalogo.locationId validado como Multi Reference.
+  - C-06: ServiciosCatalogo.mainMedia validado como Image nativo Wix.
+  - ADR-17: Enums SNAKE_CASE (DUAL_F1, NOT_PAID, SLOT_LOCK).
+  - SSOT-07: Validacion runtime centralizada via assert*.
 =============================================================================
 */
 
@@ -27,25 +24,29 @@ import wixData from "wix-data";
 import {
     BUSINESS_COLLECTIONS,
     OPERATIONAL_COLLECTIONS,
-
-    EU_VAT_PREFIXES,
-    FISCAL_ROLE,
-    EVENT_TYPE,
-    THIRD_PARTY_TYPE,
-    ITEM_NATURE,
     CONTROL_TYPE,
     CONTROL_STATUS,
-    TIMECLOCK_TYPE,
-    INVENTORY_MOVEMENT_TYPE,
-    NEGATIVE_INVENTORY_MOVEMENT_TYPES,
-    MAGNITUDE,
+    INTEGRITY,
+    RECORD_TYPE,
+    THIRD_PARTY_TYPE,
+    EVENT_TYPE,
+    FISCAL_ROLE,
+    TIPO_FACTURA,
+    TIPO_RECTIFICATIVA,
+    isValidGuid,
 } from "backend/internalConfig";
 
 import {
     assertValidEnum,
     assertCitasF2,
+    assertMapaStaff,
+    assertServiciosCatalogo,
+    assertDatosFiscales,
+    assertControlOperativo,
+    assertRegistrosHorariosStaff,
     assertMovimientosInventario,
     expectedInventoryMagnitude,
+    isValidNifOrEuVat,
 } from "backend/validation";
 
 import { logger } from "backend/logger";
@@ -53,16 +54,12 @@ import { logger } from "backend/logger";
 const log = logger;
 
 // =============================================================================
-// CONSTANTES
+// BLOQUE 0 - HELPERS INTERNOS
 // =============================================================================
 
-const GUID_PATTERN =
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const LEDGER_SCHEMA_VERSION_AEAT = INTEGRITY.LEDGER_SCHEMA_VERSION;
 
-const IMMUTABLE_ENTRY_STATUSES = new Set([
-    "POSTED",
-    "LOCKED",
-]);
+const IMMUTABLE_ENTRY_STATUSES = new Set(["POSTED", "LOCKED"]);
 
 const ALLOWED_Z_UPDATE_FIELDS = new Set([
     "closingSignature",
@@ -72,48 +69,18 @@ const ALLOWED_Z_UPDATE_FIELDS = new Set([
     "_updatedDate",
 ]);
 
-const NIF_LETRAS_DNI = "TRWAGMYFPDXBNJZSQVHLCKE";
-
-const LEDGER_SCHEMA_VERSION_AEAT = "LEDGER_V5_FISCAL";
-
-const VALID_THIRD_PARTY_TYPES = new Set([
-    "CLIENTE", "PROVEEDOR", "STAFF", "AAPP", "MIXTO",
-]);
-
-const VALID_ITEM_NATURES = new Set([
-    "SERVICIO_PROPIO", "PRODUCTO_VENTA", "PRODUCTO_USO", "GASTO_FIJO",
-]);
-
-const VALID_TAX_CODES = new Set([
-    "IVA_21", "IVA_10", "IVA_4", "IVA_0",
-    "IRPF_15", "IRPF_19", "EXENTO",
-]);
-
-const VALID_EVENT_TYPES = new Set([
-    "VENTA_LINEA", "COMPRA_LINEA", "CIERRE_Z",
-    "AJUSTE", "RECTIFICATIVA", "MOV_STOCK",
-]);
-
-const VALID_FISCAL_ROLES = new Set([
-    "EMISOR", "RECEPTOR",
-]);
-
-// =============================================================================
-// HELPERS
-// =============================================================================
-
 function _safeTrim(value) {
     if (value === null || value === undefined) return "";
     return String(value).trim();
 }
 
 function _isGuid(value) {
-    return GUID_PATTERN.test(_safeTrim(value));
+    return isValidGuid(value);
 }
 
 function _isFiniteNonNegative(value) {
-    const number = Number(value);
-    return Number.isFinite(number) && number >= 0;
+    const n = Number(value);
+    return Number.isFinite(n) && n >= 0;
 }
 
 function _isImmutableStatus(status) {
@@ -137,60 +104,24 @@ function _isV5Fiscal(item) {
     return _safeTrim(item?.schemaVersion) === LEDGER_SCHEMA_VERSION_AEAT;
 }
 
-// =============================================================================
-// VALIDACION NIF ESPANOL Y VAT UE
-// =============================================================================
-
-function _isValidNifEspanol(nif) {
-    const clean = _safeTrim(nif).toUpperCase().replace(/[-\s]/g, "");
-    if (!clean || clean.length < 8) return false;
-
-    // DNI: 8 digitos + letra
-    if (/^\d{8}[A-Z]$/.test(clean)) {
-        const numero = Number(clean.slice(0, 8));
-        const letraEsperada = NIF_LETRAS_DNI[numero % 23];
-        return clean.charAt(8) === letraEsperada;
+// C-01: rechazo explicito del campo 'active' en cualquier coleccion activa
+function _rejectActiveField(item, collectionName) {
+    if (item && typeof item === "object" && "active" in item) {
+        _schemaError(
+            `${collectionName}.active prohibido (ANEXO v8.1 C-01). Use 'status' o 'recordType' para ciclo de vida.`
+        );
     }
-
-    // NIE: X/Y/Z + 7 digitos + letra
-    if (/^[XYZ]\d{7}[A-Z]$/.test(clean)) {
-        const prefijo = { X: "0", Y: "1", Z: "2" }[clean.charAt(0)];
-        const numero = Number(prefijo + clean.slice(1, 8));
-        const letraEsperada = NIF_LETRAS_DNI[numero % 23];
-        return clean.charAt(8) === letraEsperada;
-    }
-
-    // CIF: letra + 7 digitos + digito/letra control
-    if (/^[ABCDEFGHJKLMNPQRSUVW]\d{7}[0-9A-J]$/.test(clean)) {
-        return true;
-    }
-
-    return false;
-}
-
-function _isValidNifOrEuVat(nif) {
-    const clean = _safeTrim(nif).toUpperCase().replace(/[-\s]/g, "");
-    if (!clean) return false;
-
-    if (_isValidNifEspanol(clean)) return true;
-
-    if (clean.length >= 8 && clean.length <= 14) {
-        const prefix = clean.slice(0, 2);
-        if (EU_VAT_PREFIXES.includes(prefix)) {
-            const body = clean.slice(2);
-            if (/^[A-Z0-9]{5,12}$/.test(body)) return true;
-        }
-    }
-
-    return false;
 }
 
 // =============================================================================
-// HELPERS DE LECTURA — Aceptan nomenclatura V20.1 y aliases legacy
+// BLOQUE 1 - HELPERS DE LECTURA FISCAL
 // =============================================================================
 
 function _readTaxableBase(item) {
-    const v = item.taxableBaseOrNonSubjectAmount ?? item.baseImponibleOImporteNoSujeto ?? item.taxableAmount;
+    const v =
+        item.taxableBaseOrNonSubjectAmount ??
+        item.baseImponibleOImporteNoSujeto ??
+        item.taxableAmount;
     return Number(v) || 0;
 }
 
@@ -205,20 +136,31 @@ function _readTotalAmount(item) {
 }
 
 function _readSurchargeAmount(item) {
-    const v = item.surchargeAmount ?? item.cuotaRecargoEquivalencia ?? item.importeRecargoEquivalencia;
+    const v =
+        item.surchargeAmount ??
+        item.cuotaRecargoEquivalencia ??
+        item.importeRecargoEquivalencia;
     return Number(v) || 0;
 }
 
 function _readRecipientTaxId(item) {
-    return _safeTrim(item.recipientTaxId || item.nifDestinatario || item.nifTercero);
+    return _safeTrim(
+        item.recipientTaxId || item.nifDestinatario || item.nifTercero
+    );
 }
 
 function _readRecipientLegalName(item) {
-    return _safeTrim(item.recipientLegalName || item.nombreRazonDestinatario || item.razonSocialTercero);
+    return _safeTrim(
+        item.recipientLegalName ||
+        item.nombreRazonDestinatario ||
+        item.razonSocialTercero
+    );
 }
 
 function _readInvoiceType(item) {
-    return _safeTrim(item.invoiceType || item.tipoFactura || item.claveRegistroFactura).toUpperCase();
+    return _safeTrim(
+        item.invoiceType || item.tipoFactura || item.claveRegistroFactura
+    ).toUpperCase();
 }
 
 function _readBreakdownBaseAndTax(item) {
@@ -233,14 +175,23 @@ function _readBreakdownBaseAndTax(item) {
 
     if (breakdown) {
         try {
-            const arr = typeof breakdown === "string" ? JSON.parse(breakdown) : breakdown;
+            const arr =
+                typeof breakdown === "string" ? JSON.parse(breakdown) : breakdown;
             if (Array.isArray(arr) && arr.length > 0) {
                 base = arr.reduce(
-                    (sum, d) => sum + Number(d.taxableBaseOrNonSubjectAmount ?? d.baseImponibleOImporteNoSujeto ?? d.base ?? 0),
+                    (sum, d) =>
+                        sum +
+                        Number(
+                            d.taxableBaseOrNonSubjectAmount ??
+                            d.baseImponibleOImporteNoSujeto ??
+                            d.base ??
+                            0
+                        ),
                     0
                 );
                 tax = arr.reduce(
-                    (sum, d) => sum + Number(d.chargedTaxAmount ?? d.cuotaRepercutida ?? d.cuota ?? 0),
+                    (sum, d) =>
+                        sum + Number(d.chargedTaxAmount ?? d.cuotaRepercutida ?? d.cuota ?? 0),
                     0
                 );
             }
@@ -253,36 +204,31 @@ function _readBreakdownBaseAndTax(item) {
 }
 
 function _validateF1Requirements(item) {
-    if (_readInvoiceType(item) !== "F1") return;
+    if (_readInvoiceType(item) !== TIPO_FACTURA.F1) return;
 
     const pf = item.fiscalPayload || item.payloadFiscal || {};
     const taxId = _readRecipientTaxId(item) || _safeTrim(pf.nifDestinatario);
-    const legalName = _readRecipientLegalName(item) || _safeTrim(pf.nombreRazonDestinatario);
+    const legalName =
+        _readRecipientLegalName(item) || _safeTrim(pf.nombreRazonDestinatario);
     const address = item.recipientAddress || pf.domicilioDestinatario || {};
 
-    if (!taxId) {
-        _schemaError("Factura F1 exige recipientTaxId");
-    }
-    if (!legalName) {
-        _schemaError("Factura F1 exige recipientLegalName");
-    }
+    if (!taxId) _schemaError("Factura F1 exige recipientTaxId/nifDestinatario");
+    if (!legalName) _schemaError("Factura F1 exige recipientLegalName");
     if (!address || !_safeTrim(address.cp)) {
-        _schemaError("Factura F1 exige recipientAddress con CP");
+        _schemaError("Factura F1 exige recipientAddress con cp");
     }
 }
 
 function _validateReverseCharge(item) {
-    if (item.reverseCharge !== true) return;
-
+    if (item.reverseCharge !== true && item.inversionSujetoPasivo !== true) return;
     const tax = _readTaxAmount(item);
     if (tax > 0) {
-        _schemaError("reverseCharge implica taxAmount = 0");
+        _schemaError("inversionSujetoPasivo implica cuotaTotal = 0");
     }
 }
 
 function _validateAjuste(item) {
-    if (_safeTrim(item.eventType).toUpperCase() !== "AJUSTE") return;
-
+    if (_safeTrim(item.eventType).toUpperCase() !== EVENT_TYPE.AJUSTE) return;
     if (!_safeTrim(item.previousInvoiceId)) {
         _schemaError("eventType=AJUSTE exige previousInvoiceId");
     }
@@ -291,8 +237,22 @@ function _validateAjuste(item) {
 function _validateFiscalRole(item) {
     const role = _safeTrim(item.fiscalRole).toUpperCase();
     if (!role) return;
-    if (!VALID_FISCAL_ROLES.has(role)) {
-        _schemaError("fiscalRole invalido (EMISOR|RECEPTOR)");
+    assertValidEnum(role, FISCAL_ROLE, "fiscalRole");
+}
+
+function _validateRectificativa(item) {
+    const tipo = _safeTrim(item.tipoFactura).toUpperCase();
+    if (!tipo.startsWith("R")) return;
+    assertValidEnum(tipo, TIPO_FACTURA, "tipoFactura");
+    if (item.tipoRectificativa !== undefined && item.tipoRectificativa !== null) {
+        assertValidEnum(
+            _safeTrim(item.tipoRectificativa).toUpperCase(),
+            TIPO_RECTIFICATIVA,
+            "tipoRectificativa"
+        );
+    }
+    if (!_safeTrim(item.previousInvoiceId)) {
+        _schemaError("Factura rectificativa R1-R5 exige previousInvoiceId");
     }
 }
 
@@ -300,11 +260,11 @@ function _validateFiscalPayload(item) {
     if (!_isV5Fiscal(item)) return;
 
     const eventType = _safeTrim(item.eventType).toUpperCase();
-    if (!eventType || !VALID_EVENT_TYPES.has(eventType)) {
-        _schemaError("eventType obligatorio y valido");
-    }
+    if (!eventType) return;
 
-    if (eventType !== "CIERRE_Z") {
+    assertValidEnum(eventType, EVENT_TYPE, "eventType");
+
+    if (eventType !== EVENT_TYPE.CIERRE_Z) {
         if (!_isGuid(item.thirdPartyId)) {
             _schemaError("thirdPartyId obligatorio (FK DatosFiscales)");
         }
@@ -313,13 +273,23 @@ function _validateFiscalPayload(item) {
         }
     }
 
-    if (["VENTA_LINEA", "COMPRA_LINEA", "RECTIFICATIVA", "MOV_STOCK"].includes(eventType)) {
+    if (
+        [
+            EVENT_TYPE.VENTA_LINEA,
+            EVENT_TYPE.COMPRA_LINEA,
+            EVENT_TYPE.RECTIFICATIVA,
+            EVENT_TYPE.MOV_STOCK,
+        ].includes(eventType)
+    ) {
         if (!_isGuid(item.catalogId)) {
             _schemaError("catalogId obligatorio (FK ServiciosCatalogo)");
         }
     }
 
-    if (!Number.isFinite(Number(item.sequenceNumber)) || Number(item.sequenceNumber) <= 0) {
+    if (
+        !Number.isFinite(Number(item.sequenceNumber)) ||
+        Number(item.sequenceNumber) <= 0
+    ) {
         _schemaError("sequenceNumber obligatorio (> 0)");
     }
 
@@ -329,32 +299,37 @@ function _validateFiscalPayload(item) {
 }
 
 // =============================================================================
-// BLOQUE 1 - MOVIMIENTOS DE CAJA
+// BLOQUE 2 - MovimientosCaja (LEDGER APPEND-ONLY, Ley 11/2021)
 // =============================================================================
 
 export function MovimientosCaja_beforeInsert(item) {
     if (!item || typeof item !== "object") return item;
 
-    // Validar NIF/VAT del destinatario
+    _rejectActiveField(item, "MovimientosCaja");
+
     const taxId = _readRecipientTaxId(item);
-    if (taxId && !_isValidNifOrEuVat(taxId)) {
-        _schemaError("recipientTaxId no tiene formato valido (espanol o VAT UE)");
+    if (taxId && !isValidNifOrEuVat(taxId)) {
+        _schemaError("recipientTaxId/nifDestinatario no tiene formato valido (NIF/VAT-UE)");
     }
 
-    // Validar cuadre fiscal segun fiscalRole
     const { base, tax } = _readBreakdownBaseAndTax(item);
     const finalBase = base > 0 ? base : _readTaxableBase(item);
     const finalTax = tax > 0 ? tax : _readTaxAmount(item);
 
-    const withholding = Number(item.irpfWithholdingAmount || item.importeRetencionIRPF) || 0;
+    const withholding =
+        Number(item.irpfWithholdingAmount || item.importeRetencionIRPF) || 0;
     const surcharge = _readSurchargeAmount(item);
     const total = _readTotalAmount(item);
 
     if (finalBase > 0 || finalTax > 0 || withholding > 0 || surcharge > 0) {
-        const role = _safeTrim(item.fiscalRole || item.rolFiscal).toUpperCase() || FISCAL_ROLE.EMISOR;
+        const role =
+            _safeTrim(item.fiscalRole || item.rolFiscal).toUpperCase() ||
+            FISCAL_ROLE.EMISOR;
         const withholdingFactor = role === FISCAL_ROLE.RECEPTOR ? 1 : -1;
 
-        const expected = _roundItem(finalBase + finalTax + surcharge + withholdingFactor * withholding);
+        const expected = _roundItem(
+            finalBase + finalTax + surcharge + withholdingFactor * withholding
+        );
         const diff = Math.abs(expected - total);
         if (diff > 0.02) {
             _schemaError(
@@ -363,16 +338,13 @@ export function MovimientosCaja_beforeInsert(item) {
         }
     }
 
-    // Validaciones nuevas V20.1
     _validateF1Requirements(item);
     _validateReverseCharge(item);
     _validateAjuste(item);
+    _validateRectificativa(item);
     _validateFiscalRole(item);
-
-    // Validaciones capa AEAT V5
     _validateFiscalPayload(item);
 
-    // Cuadre detailedBreakdown vs cabecera
     if (Array.isArray(item.detailedBreakdown) && item.detailedBreakdown.length > 0) {
         let sumBase = 0;
         let sumTax = 0;
@@ -381,16 +353,18 @@ export function MovimientosCaja_beforeInsert(item) {
             sumTax += Number(d.chargedTaxAmount ?? d.cuota ?? 0);
         }
         if (Math.abs(_roundItem(sumBase) - finalBase) > 0.02) {
-            _schemaError(`detailedBreakdown.base (${sumBase}) no cuadra con cabecera (${finalBase})`);
+            _schemaError(
+                `detailedBreakdown.base (${sumBase}) no cuadra con cabecera (${finalBase})`
+            );
         }
         if (Math.abs(_roundItem(sumTax) - finalTax) > 0.02) {
-            _schemaError(`detailedBreakdown.cuota (${sumTax}) no cuadra con cabecera (${finalTax})`);
+            _schemaError(
+                `detailedBreakdown.cuota (${sumTax}) no cuadra con cabecera (${finalTax})`
+            );
         }
     }
 
-    // Validar regimeKey coherente con catalogo
     if (item.catalogId) {
-        // Aqui solo validamos que si viene regimeKey, sea coherente con el payload
         const payloadRegimeKey = _safeTrim(item.fiscalPayload?.claveRegimen);
         const itemRegimeKey = _safeTrim(item.regimeKey);
         if (payloadRegimeKey && itemRegimeKey && payloadRegimeKey !== itemRegimeKey) {
@@ -398,8 +372,6 @@ export function MovimientosCaja_beforeInsert(item) {
         }
     }
 
-    // FASE2 SSOT-12: trazabilidad transaccional obligatoria en toda escritura
-    // del ledger + version de esquema AEAT canonica.
     if (!_safeTrim(item.traceId)) {
         _schemaError("traceId obligatorio en MovimientosCaja (SSOT-12)");
     }
@@ -412,19 +384,42 @@ export function MovimientosCaja_beforeInsert(item) {
 
 export function MovimientosCaja_beforeUpdate() {
     _fiscalError(
-        "Modificacion de MovimientosCaja prohibida por normativa fiscal (append-only). Use eventType=AJUSTE."
+        "Modificacion de MovimientosCaja prohibida por normativa fiscal (append-only, Ley 11/2021). Use eventType=AJUSTE o factura rectificativa R1-R5."
     );
 }
 
 export function MovimientosCaja_beforeRemove() {
     _fiscalError(
-        "Borrado de MovimientosCaja prohibido por normativa fiscal"
+        "Borrado de MovimientosCaja prohibido por normativa fiscal (Ley 11/2021 + Veri*Factu)."
     );
 }
 
 // =============================================================================
-// BLOQUE 2 - CIERRES Z
+// BLOQUE 3 - HistoricoCierresZ (LEDGER, actualizacion restringida a firma)
 // =============================================================================
+
+export function HistoricoCierresZ_beforeInsert(item) {
+    if (!item || typeof item !== "object") return item;
+    _rejectActiveField(item, "HistoricoCierresZ");
+
+    if (!_safeTrim(item.recordDomain)) {
+        _schemaError("HistoricoCierresZ.recordDomain obligatorio (ADR-01)");
+    }
+    if (!_safeTrim(item.traceId)) {
+        _schemaError("HistoricoCierresZ.traceId obligatorio (SSOT-12)");
+    }
+    if (!item.operationDate) {
+        _schemaError("HistoricoCierresZ.operationDate obligatorio");
+    }
+
+    const start = Number(item.startSequence);
+    const end = Number(item.endSequence);
+    if (Number.isFinite(start) && Number.isFinite(end) && end < start) {
+        _schemaError(`endSequence (${end}) debe ser >= startSequence (${start})`);
+    }
+
+    return item;
+}
 
 export function HistoricoCierresZ_beforeUpdate(item, context) {
     const previous = context?.original || {};
@@ -440,7 +435,7 @@ export function HistoricoCierresZ_beforeUpdate(item, context) {
 
     if (!onlySignatureFields) {
         _fiscalError(
-            "Modificacion de HistoricoCierresZ prohibida. Solo se permite actualizar closingSignature/closingSignatureStatus desde recovery."
+            "Modificacion de HistoricoCierresZ prohibida. Solo se permite actualizar closingSignature/closingSignatureStatus/verifiedAt/approverUser."
         );
     }
 
@@ -449,29 +444,56 @@ export function HistoricoCierresZ_beforeUpdate(item, context) {
 
 export function HistoricoCierresZ_beforeRemove() {
     _fiscalError(
-        "Borrado de HistoricoCierresZ prohibido por normativa fiscal"
+        "Borrado de HistoricoCierresZ prohibido por normativa fiscal (Ley 58/2003 art. 29-30)."
     );
 }
 
 // =============================================================================
-// BLOQUE 3 - REGISTROS HORARIOS
+// BLOQUE 4 - RegistrosHorariosStaff (LEDGER, RD 8/2019)
 // =============================================================================
+
+export function RegistrosHorariosStaff_beforeInsert(item) {
+    if (!item || typeof item !== "object") return item;
+    _rejectActiveField(item, "RegistrosHorariosStaff");
+
+    // C-04: valida memberId (no staffMemberId)
+    assertRegistrosHorariosStaff(item);
+
+    return item;
+}
 
 export function RegistrosHorariosStaff_beforeUpdate() {
     _fiscalError(
-        "Modificacion de RegistrosHorariosStaff prohibida"
+        "Modificacion de RegistrosHorariosStaff prohibida (append-only, RD 8/2019 + Art. 34.9 ET). Use clockEventType=AJUSTE con adjustmentReason."
     );
 }
 
 export function RegistrosHorariosStaff_beforeRemove() {
     _fiscalError(
-        "Borrado de RegistrosHorariosStaff prohibido"
+        "Borrado de RegistrosHorariosStaff prohibido. Retencion legal 4 anos (RD 8/2019)."
     );
 }
 
 // =============================================================================
-// BLOQUE 4 - CAJA ACTUAL
+// BLOQUE 5 - CajaActual (SINGLETON PROTEGIDO)
 // =============================================================================
+
+export function CajaActual_beforeInsert(item) {
+    if (!item || typeof item !== "object") return item;
+    _rejectActiveField(item, "CajaActual");
+
+    const id = _safeTrim(item._id);
+    if (id !== "CAJA_PRINCIPAL" && id !== "CAJA_SEQ") {
+        _schemaError(
+            "CajaActual._id debe ser CAJA_PRINCIPAL o CAJA_SEQ (singleton, ADR-11)"
+        );
+    }
+    if (!_safeTrim(item.traceId)) {
+        _schemaError("CajaActual.traceId obligatorio (SSOT-12)");
+    }
+
+    return item;
+}
 
 export function CajaActual_beforeUpdate(item, context) {
     const previous = context?.original || {};
@@ -482,12 +504,10 @@ export function CajaActual_beforeUpdate(item, context) {
     const changed =
         JSON.stringify(prevSeq || {}) !== JSON.stringify(nextSeq || {});
 
-    if (changed && item?._id !== "CAJA_SEQ") {
-        log.warn("CajaActual_beforeUpdate: sequenceCounters modified on non-CAJA_SEQ document", {
-            _id: item?._id,
-            prev: prevSeq,
-            next: nextSeq,
-        });
+    if (changed && _safeTrim(item?._id) !== "CAJA_SEQ") {
+        _schemaError(
+            "sequenceCounters solo modificable en documento _id=CAJA_SEQ (ADR-12)"
+        );
     }
 
     return item;
@@ -495,101 +515,86 @@ export function CajaActual_beforeUpdate(item, context) {
 
 export function CajaActual_beforeRemove() {
     throw new Error(
-        "SINGLETON_PROTECTED: No se puede eliminar el estado de caja"
+        "SINGLETON_PROTECTED: No se puede eliminar el estado de caja (ADR-11)."
     );
 }
 
 // =============================================================================
-// BLOQUE 5 - SERVICIOS CATALOGO
+// BLOQUE 6 - ServiciosCatalogo (ANEXO v8.1 C-05/C-06)
 // =============================================================================
 
 export function ServiciosCatalogo_beforeInsert(item) {
+    _rejectActiveField(item, "ServiciosCatalogo");
     return _validateServiciosCatalogoSchema(item);
 }
 
 export function ServiciosCatalogo_beforeUpdate(item) {
+    _rejectActiveField(item, "ServiciosCatalogo");
     return _validateServiciosCatalogoSchema(item);
 }
 
-function _validateServiciosCatalogoSchema(item = {}) {
-    const serviceId = _safeTrim(item.serviceId || item._id);
-    const linkedPhases = _safeTrim(item.linkedPhases);
-    const allowCombine = item.allowCombine === true;
+export function ServiciosCatalogo_beforeRemove(item) {
+    // Solo Admin. Verificacion de referencias activas en CitasF2 se hace
+    // a nivel de webMethod (reservas.web.js) antes de invocar remove.
+    return item;
+}
 
-    if (item.serviceId && !_isGuid(item.serviceId)) {
-        _schemaError("serviceId debe ser un GUID valido");
+function _validateServiciosCatalogoSchema(item) {
+    if (!item || typeof item !== "object") return item;
+
+    // Delega en assertServiciosCatalogo (validacion centralizada SSOT-07)
+    assertServiciosCatalogo(item);
+
+    // Calculo canonico de totalDuration (sin fallback 30, BIBLIA 2.1)
+    const phase1 = Number(item.phase1Duration) || 0;
+    const exposure = Number(item.exposureDuration) || 0;
+    const phase2 = Number(item.phase2Duration) || 0;
+
+    if (item.allowCombine === true) {
+        item.totalDuration = phase1 + exposure + phase2;
+    } else if (phase1 > 0) {
+        item.totalDuration = phase1;
     }
 
-    if (allowCombine && !linkedPhases) {
-        _schemaError("Servicio dual requiere linkedPhases");
-    }
-
-    if (linkedPhases && !_isGuid(linkedPhases)) {
-        _schemaError("linkedPhases debe ser un GUID valido");
-    }
-
-    if (linkedPhases && linkedPhases === serviceId) {
-        _schemaError("linkedPhases no puede referenciar al propio servicio");
-    }
-
-    // Validar itemNature si viene
-    const itemNature = _safeTrim(item.itemNature || item.naturalezaItem).toUpperCase();
-    if (itemNature && !VALID_ITEM_NATURES.has(itemNature)) {
-        _schemaError("itemNature invalido");
-    }
-
-    // Validar taxCode si viene
-    const taxCode = _safeTrim(item.taxCode || item.codigoImpuesto).toUpperCase();
-    if (taxCode && !VALID_TAX_CODES.has(taxCode)) {
-        _schemaError("taxCode invalido");
-    }
-
-    const phase1Duration = Number(item.phase1Duration) || 0;
-    const exposureDuration = Number(item.exposureDuration) || 0;
-    const phase2Duration = Number(item.phase2Duration) || 0;
-
-    if (
-        !_isFiniteNonNegative(phase1Duration) ||
-        !_isFiniteNonNegative(exposureDuration) ||
-        !_isFiniteNonNegative(phase2Duration)
-    ) {
-        _schemaError("Las duraciones deben ser numeros no negativos");
-    }
-
-    // MATRIZ E SSOT v7.0: totalDuration es SIEMPRE la suma exacta de fases.
-    // Se elimina la lectura del valor persistido legacy y el fallback 30.
-    if (allowCombine) {
-        item.totalDuration = phase1Duration + exposureDuration + phase2Duration;
-    } else {
-        item.totalDuration = phase1Duration;
+    if (!_isFiniteNonNegative(item.totalDuration)) {
+        _schemaError("totalDuration debe ser un numero no negativo");
     }
 
     return item;
 }
 
 // =============================================================================
-// BLOQUE 6 - MAPA STAFF
+// BLOQUE 7 - MapaStaff (ANEXO v8.1 C-02/C-03)
 // =============================================================================
 
 export async function MapaStaff_beforeInsert(item) {
+    _rejectActiveField(item, "MapaStaff");
     return _validateMapaStaffUniqueness(item);
 }
 
 export async function MapaStaff_beforeUpdate(item) {
+    _rejectActiveField(item, "MapaStaff");
     return _validateMapaStaffUniqueness(item);
 }
 
-async function _validateMapaStaffUniqueness(item = {}) {
+export function MapaStaff_beforeRemove(item) {
+    // Solo Admin. La verificacion de referencias activas (RegistrosHorariosStaff,
+    // CitasF2) se realiza a nivel de webMethod antes de invocar remove.
+    return item;
+}
+
+async function _validateMapaStaffUniqueness(item) {
+    if (!item || typeof item !== "object") return item;
+
+    // C-02/C-03: valida memberId, rolBookings, rolWebsite (no staffMemberId/staffRole)
+    assertMapaStaff(item);
+
     const itemId = _safeTrim(item._id);
     const resourceId = _safeTrim(item.resourceId);
-    const staffMemberId = _safeTrim(item.staffMemberId);
+    const memberId = _safeTrim(item.memberId);
     const email = _safeTrim(item.email).toLowerCase();
 
     if (resourceId) {
-        if (!_isGuid(resourceId)) {
-            _schemaError("resourceId debe ser un GUID valido");
-        }
-
         const existingByResource = await wixData
             .query(BUSINESS_COLLECTIONS.MAPA_STAFF)
             .eq("resourceId", resourceId)
@@ -602,24 +607,23 @@ async function _validateMapaStaffUniqueness(item = {}) {
         }
     }
 
-    if (staffMemberId) {
+    // C-03: unicidad por memberId (antes staffMemberId)
+    if (memberId) {
         const existingByMember = await wixData
             .query(BUSINESS_COLLECTIONS.MAPA_STAFF)
-            .eq("staffMemberId", staffMemberId)
+            .eq("memberId", memberId)
             .ne("_id", itemId)
             .limit(1)
             .find({ suppressAuth: true });
 
         if (existingByMember?.items?.length > 0) {
-            _schemaError("staffMemberId duplicado en MapaStaff");
+            _schemaError("memberId duplicado en MapaStaff (ANEXO v8.1 C-03)");
         }
     }
 
     if (email) {
-        // ADR-03: el indice de email en MapaStaff NO es unico segun BIBLIA 14.
-        // Se relaja la unicidad de email en el hook; la unicidad canonica se
-        // preserva via resourceId/staffMemberId (bloques superiores).
-        log.warn("MapaStaff email duplicado permitido (ADR-03, indice no unico)", {
+        // ADR-03: email NO unico (permite correos compartidos de empresa)
+        log.warn("MapaStaff email registrado (ADR-03: indice no unico)", {
             emailDomain: email.split("@")[1] || "",
         });
     }
@@ -628,41 +632,18 @@ async function _validateMapaStaffUniqueness(item = {}) {
 }
 
 // =============================================================================
-// BLOQUE 7 - ASIENTOS CONTABLES
-// =============================================================================
-
-export function AsientosContables_beforeUpdate(item) {
-    if (_isImmutableStatus(item?.entryStatus)) {
-        _fiscalError("No se puede modificar un asiento POSTED o LOCKED");
-    }
-
-    return item;
-}
-
-export function AsientosContables_beforeRemove(item) {
-    if (_isImmutableStatus(item?.entryStatus)) {
-        _fiscalError("No se puede eliminar un asiento POSTED o LOCKED");
-    }
-
-    return item;
-}
-
-// =============================================================================
-// BLOQUE 8 - LINEAS DE ASIENTO
+// BLOQUE 8 - LibroAsientosContablesDetalle (LEDGER CONTABLE, ADR-10)
 // =============================================================================
 
 export function LibroAsientosContablesDetalle_beforeInsert(item) {
     if (!item || typeof item !== "object") return item;
+    _rejectActiveField(item, "LibroAsientosContablesDetalle");
 
-    // Validar cuenta PGC obligatoria y de 6 digitos (solo si viene)
     const code = _safeTrim(item.accountCode || item.cuentaContable);
-    if (code) {
-        if (!/^\d{6}$/.test(code)) {
-            _schemaError(`accountCode "${code}" no tiene formato PGC (6 digitos)`);
-        }
+    if (code && !/^\d{6}$/.test(code)) {
+        _schemaError(`accountCode "${code}" no tiene formato PGC (6 digitos)`);
     }
 
-    // Validaciones capa AEAT v5
     if (_isV5Fiscal(item) || _safeTrim(item.sourceEventId || item.eventoOrigenId)) {
         const sourceEventId = _safeTrim(item.sourceEventId || item.eventoOrigenId);
         const thirdPartyId = _safeTrim(item.thirdPartyId || item.terceroId);
@@ -693,6 +674,10 @@ export function LibroAsientosContablesDetalle_beforeInsert(item) {
         }
     }
 
+    if (!_safeTrim(item.traceId)) {
+        _schemaError("LibroAsientosContablesDetalle.traceId obligatorio (SSOT-12)");
+    }
+
     return item;
 }
 
@@ -704,225 +689,53 @@ export async function LibroAsientosContablesDetalle_beforeRemove(item) {
     return _validateAccountingLineParent(item);
 }
 
-export async function LineasAsientoContable_beforeUpdate(item) {
-    return _validateAccountingLineParent(item);
-}
-
-export async function LineasAsientoContable_beforeRemove(item) {
-    return _validateAccountingLineParent(item);
-}
-
-async function _validateAccountingLineParent(item = {}) {
-    // FASE3 SSOT-09: AsientosContables es FORBIDDEN; no se lee el padre.
-    // La inmutabilidad se aplica sobre el propio item (estado embebido en la
-    // linea al proyectarse desde el ledger).
-    const parentStatus = _safeTrim(item.parentEntryStatus);
-
+async function _validateAccountingLineParent(item) {
+    const parentStatus = _safeTrim(item?.parentEntryStatus);
     if (parentStatus && _isImmutableStatus(parentStatus)) {
         _fiscalError(
             "No se puede modificar o eliminar una linea de asiento POSTED o LOCKED"
         );
     }
-
     return item;
 }
 
 // =============================================================================
-// BLOQUE 9 - SECUENCIA DE TICKETS (RETIRADA, ADR-02)
-// =============================================================================
-// FASE2/ADR-02: SecuenciaTickets se retira formalmente. La secuencia de tickets
-// vive ahora en CajaActual.CAJA_SEQ; los hooks de la coleccion bloqueada se
-// eliminan por orden del plan (no hay hook que proteger).
-
-// =============================================================================
-// BLOQUE 10 - CIERRES DE INVENTARIO (RETIRADA, ADR-02)
-// =============================================================================
-// FASE2/ADR-02: InventarioStockVentaCierre se retira; el cierre de inventario
-// queda absorbido por HistoricoCierresZ (bloque inventario). Sus hooks se
-// retiraron; la inmutabilidad la garantiza HistoricoCierresZ_beforeUpdate/Remove.
-
-// =============================================================================
-// BLOQUE 11 - DATOS FISCALES
+// BLOQUE 9 - DatosFiscales (ANEXO v8.1 C-01/C-03)
 // =============================================================================
 
 export function DatosFiscales_beforeInsert(item) {
-    if (!item || typeof item !== "object") return item;
-
-    const taxId = _safeTrim(item.taxId || item.nifCif);
-    if (!taxId || !_isValidNifOrEuVat(taxId)) {
-        _schemaError("taxId obligatorio y valido (espanol o VAT UE)");
-    }
-
-    const legalName = _safeTrim(item.legalName || item.razonSocial);
-    if (!legalName) {
-        _schemaError("legalName obligatoria");
-    }
-
-    const type = _safeTrim(item.thirdPartyType || item.tipoTercero).toUpperCase();
-    if (!type || !VALID_THIRD_PARTY_TYPES.has(type)) {
-        _schemaError("thirdPartyType invalido (CLIENTE, PROVEEDOR, STAFF, AAPP, MIXTO)");
-    }
-
-    if (type === "STAFF") {
-        const bookingsResourceId = _safeTrim(item.bookingsResourceId || item.resourceIdBookings);
-        const staffMemberId = _safeTrim(item.staffMemberId);
-        if (!_isGuid(bookingsResourceId)) {
-            _schemaError("thirdPartyType=STAFF exige bookingsResourceId GUID");
-        }
-        if (!staffMemberId) {
-            _schemaError("thirdPartyType=STAFF exige staffMemberId");
-        }
-    }
-
-    return item;
+    _rejectActiveField(item, "DatosFiscales");
+    return _validateDatosFiscalesSchema(item);
 }
 
 export function DatosFiscales_beforeUpdate(item) {
+    _rejectActiveField(item, "DatosFiscales");
+    return _validateDatosFiscalesSchema(item);
+}
+
+export function DatosFiscales_beforeRemove(item) {
+    const id = _safeTrim(item?._id);
+    if (id === "CONFIG_SISTEMA_FISCAL") {
+        _fiscalError(
+            "CONFIG_SISTEMA_FISCAL es singleton protegido. No se puede eliminar."
+        );
+    }
+    return item;
+}
+
+function _validateDatosFiscalesSchema(item) {
     if (!item || typeof item !== "object") return item;
 
-    const taxId = _safeTrim(item.taxId || item.nifCif);
-    if (taxId && !_isValidNifOrEuVat(taxId)) {
-        _schemaError("taxId invalido en update");
-    }
+    // Delega en assertDatosFiscales (valida taxId, recordType, thirdPartyType,
+    // memberId en STAFF, rechazo de 'active')
+    assertDatosFiscales(item);
 
-    return item;
-}
-
-// =============================================================================
-// BLOQUE 12 - FACTURAS RECIBIDAS (PROHIBIDA SSOT v20.1 / BIBLIA 6)
-// =============================================================================
-// FASE4: FacturasRecibidas esta en FORBIDDEN_COLLECTIONS. El evento de compra
-// permanece en MovimientosCaja y su detalle en LibroAsientosContablesDetalle
-// con recordType "PURCHASE_DETAIL" (eventLog.js). Los hooks anteriores
-// validaban un esquema de una coleccion que ya no admite escrituras; ahora
-// bloquean cualquier intento residual (incluido legacy data migrada).
-
-export function FacturasRecibidas_beforeInsert() {
-    _fiscalError(
-        "FacturasRecibidas esta prohibida por la SSOT: registrar compras en MovimientosCaja + LibroAsientosContablesDetalle (PURCHASE_DETAIL)"
-    );
-}
-
-export function FacturasRecibidas_beforeUpdate() {
-    _fiscalError(
-        "FacturasRecibidas esta prohibida por la SSOT: no se admiten actualizaciones"
-    );
-}
-
-export function FacturasRecibidas_beforeRemove() {
-    _fiscalError(
-        "FacturasRecibidas esta prohibida por la SSOT: no se admiten eliminaciones"
-    );
-}
-
-// =============================================================================
-// BLOQUE 13 - CITAS F2 (hooks SSOT 13.2)
-// =============================================================================
-
-export function CitasF2_beforeInsert(item) {
-    assertCitasF2(item);
-    return item;
-}
-
-export function CitasF2_beforeUpdate(item) {
-    assertCitasF2(item);
-    return item;
-}
-
-// =============================================================================
-// BLOQUE 14 - MOVIMIENTOS INVENTARIO (append-only, SSOT 13.1, FASE4-INV)
-// =============================================================================
-
-export async function MovimientosInventario_beforeInsert(item) {
-    if (!item || typeof item !== "object") return item;
-
-    // Validacion completa: enum canonico (con normalizacion legacy->canonico
-    // y escritura del valor canonico), idempotencia (movementToken),
-    // trazabilidad (traceId + operationDescription) y cuadre de stock.
-    assertMovimientosInventario(item);
-
-    // Derivacion canonica de magnitude si el productor no la envio
-    // (SSOT 13.1: magnitude deriva del signo de quantityDelta).
-    if (item.magnitude === undefined || item.magnitude === null || item.magnitude === "") {
-        item.magnitude = expectedInventoryMagnitude(item.movementType, item.quantityDelta);
-    }
-
-    // Unicidad de movementToken (idempotencia dura a nivel de hook).
-    const token = _safeTrim(item.movementToken);
-    const existing = await wixData.query(OPERATIONAL_COLLECTIONS.MOVIMIENTOS_INVENTARIO)
-        .eq("movementToken", token)
-        .limit(1)
-        .find({ suppressAuth: true });
-    if (existing?.items?.length > 0) {
-        _fiscalError(`movementToken duplicado en MovimientosInventario: ${token}`);
-    }
-
-    return item;
-}
-
-export function MovimientosInventario_beforeUpdate() {
-    _fiscalError("MovimientosInventario es append-only");
-}
-
-export function MovimientosInventario_beforeRemove() {
-    _fiscalError("Borrado prohibido en MovimientosInventario");
-}
-
-// =============================================================================
-// BLOQUE 15 - CONTROL OPERATIVO (8-en-1, ADR-05)
-// =============================================================================
-
-export function ControlOperativo_beforeInsert(item) {
-    if (!item || typeof item !== "object") return item;
-
-    assertValidEnum(item.controlType, CONTROL_TYPE, "controlType");
-
-    if (!_safeTrim(item.dedupeKey)) {
-        _schemaError("dedupeKey obligatorio en ControlOperativo");
-    }
-    if (!_safeTrim(item.status) || !Object.values(CONTROL_STATUS).includes(item.status)) {
-        _schemaError("status invalido en ControlOperativo (CONTROL_STATUS)");
-    }
-    if (!_safeTrim(item.traceId)) {
-        _schemaError("traceId obligatorio (SSOT-12)");
-    }
-    if (item.controlType === CONTROL_TYPE.WEBHOOK_EVENT && !_safeTrim(item.eventId)) {
-        _schemaError("WEBHOOK_EVENT exige eventId");
-    }
-
-    return item;
-}
-
-export function ControlOperativo_beforeUpdate(item, context) {
-    const original = context?.original || item;
-    if (_safeTrim(original?.controlType) === CONTROL_TYPE.WEBHOOK_EVENT) {
-        _fiscalError("WEBHOOK_EVENT es append-only (ADR-05)");
-    }
-    return item;
-}
-
-export function ControlOperativo_beforeRemove(item) {
-    if (_safeTrim(item?.controlType) === CONTROL_TYPE.WEBHOOK_EVENT) {
-        _fiscalError("Borrado prohibido en WEBHOOK_EVENT");
-    }
-    return item;
-}
-
-// =============================================================================
-// BLOQUE 16 - INVENTARIO STOCK VENTA (invariante de stock)
-// =============================================================================
-
-export function InventarioStockVenta_beforeUpdate(item) {
-    if (!item || typeof item !== "object") return item;
-
-    const stockOnHand = Number(item.stockOnHand);
-    const stockReserved = Number(item.stockReserved ?? 0);
-    const stockAvailable = Number(item.stockAvailable);
-
-    if (Number.isFinite(stockOnHand) && Number.isFinite(stockAvailable)) {
-        if (Math.abs((stockOnHand - stockReserved) - stockAvailable) > 0.001) {
+    // Validacion adicional CONFIG_SISTEMA
+    if (_safeTrim(item.recordType) === RECORD_TYPE.CONFIG_SISTEMA) {
+        const nifProductor = _safeTrim(item.nifProductor || item.producerTaxId);
+        if (!nifProductor || !isValidNifOrEuVat(nifProductor)) {
             _schemaError(
-                `InventarioStockVenta: stockAvailable (${stockAvailable}) debe ser stockOnHand (${stockOnHand}) - stockReserved (${stockReserved})`
+                "CONFIG_SISTEMA exige nifProductor valido (Veri*Factu, Ley 11/2021)"
             );
         }
     }
@@ -931,21 +744,214 @@ export function InventarioStockVenta_beforeUpdate(item) {
 }
 
 // =============================================================================
-// BLOQUE 17 - REGISTROS HORARIOS STAFF (fichajes, SSOT 13 / RD 8/2019)
+// BLOQUE 10 - ComplementosCatalogo (SSOT-17, ADR-04 v2)
 // =============================================================================
 
-export function RegistrosHorariosStaff_beforeInsert(item) {
+export function ComplementosCatalogo_beforeInsert(item) {
     if (!item || typeof item !== "object") return item;
+    _rejectActiveField(item, "ComplementosCatalogo");
 
-    assertValidEnum(item.clockEventType, TIMECLOCK_TYPE, "clockEventType");
-
-    if (item.clockEventType === TIMECLOCK_TYPE.AJUSTE && !_safeTrim(item.adjustmentReason)) {
-        _schemaError("clockEventType=AJUSTE exige adjustmentReason");
+    if (!_safeTrim(item.addOnId)) {
+        _schemaError("ComplementosCatalogo.addOnId obligatorio");
     }
-
+    if (!_isFiniteNonNegative(item.price)) {
+        _schemaError("ComplementosCatalogo.price debe ser >= 0");
+    }
     if (!_safeTrim(item.traceId)) {
-        _schemaError("traceId obligatorio en RegistrosHorariosStaff (SSOT-12)");
+        _schemaError("ComplementosCatalogo.traceId obligatorio (SSOT-12)");
     }
 
     return item;
+}
+
+export function ComplementosCatalogo_beforeUpdate(item) {
+    if (!item || typeof item !== "object") return item;
+    _rejectActiveField(item, "ComplementosCatalogo");
+    return item;
+}
+
+export function ComplementosCatalogo_beforeRemove(item) {
+    // Solo Admin. Verificacion de referencias en ServiciosCatalogo.addOnOptions
+    // se realiza a nivel de webMethod antes de invocar remove.
+    return item;
+}
+
+// =============================================================================
+// BLOQUE 11 - CitasF2 (PROYECCION BOOKINGS)
+// =============================================================================
+
+export function CitasF2_beforeInsert(item) {
+    if (!item || typeof item !== "object") return item;
+    _rejectActiveField(item, "CitasF2");
+
+    assertCitasF2(item);
+
+    return item;
+}
+
+export function CitasF2_beforeUpdate(item) {
+    if (!item || typeof item !== "object") return item;
+    _rejectActiveField(item, "CitasF2");
+
+    assertCitasF2(item);
+
+    return item;
+}
+
+export function CitasF2_beforeRemove(item) {
+    return item;
+}
+
+// =============================================================================
+// BLOQUE 12 - MovimientosInventario (LEDGER APPEND-ONLY)
+// =============================================================================
+
+export async function MovimientosInventario_beforeInsert(item) {
+    if (!item || typeof item !== "object") return item;
+    _rejectActiveField(item, "MovimientosInventario");
+
+    assertMovimientosInventario(item);
+
+    if (item.magnitude === undefined || item.magnitude === null || item.magnitude === "") {
+        item.magnitude = expectedInventoryMagnitude(
+            item.movementType,
+            item.quantityDelta
+        );
+    }
+
+    const token = _safeTrim(item.movementToken);
+    const existing = await wixData
+        .query(OPERATIONAL_COLLECTIONS.MOVIMIENTOS_INVENTARIO)
+        .eq("movementToken", token)
+        .limit(1)
+        .find({ suppressAuth: true });
+
+    if (existing?.items?.length > 0) {
+        _fiscalError(`movementToken duplicado en MovimientosInventario: ${token}`);
+    }
+
+    return item;
+}
+
+export function MovimientosInventario_beforeUpdate() {
+    _fiscalError("MovimientosInventario es append-only (SSOT-05).");
+}
+
+export function MovimientosInventario_beforeRemove() {
+    _fiscalError("Borrado prohibido en MovimientosInventario (ledger).");
+}
+
+// =============================================================================
+// BLOQUE 13 - ControlOperativo (8-en-1, ADR-05)
+// =============================================================================
+
+export function ControlOperativo_beforeInsert(item) {
+    if (!item || typeof item !== "object") return item;
+    _rejectActiveField(item, "ControlOperativo");
+
+    assertControlOperativo(item);
+
+    return item;
+}
+
+export function ControlOperativo_beforeUpdate(item, context) {
+    const original = context?.original || item;
+    if (_safeTrim(original?.controlType) === CONTROL_TYPE.WEBHOOK_EVENT) {
+        _fiscalError("WEBHOOK_EVENT es append-only (ADR-05).");
+    }
+    return item;
+}
+
+export function ControlOperativo_beforeRemove(item) {
+    if (_safeTrim(item?.controlType) === CONTROL_TYPE.WEBHOOK_EVENT) {
+        _fiscalError("Borrado prohibido en WEBHOOK_EVENT (ADR-05).");
+    }
+    return item;
+}
+
+// =============================================================================
+// BLOQUE 14 - InventarioStockVenta (SNAPSHOT, invariante aritmetico)
+// =============================================================================
+
+export function InventarioStockVenta_beforeInsert(item) {
+    if (!item || typeof item !== "object") return item;
+    _rejectActiveField(item, "InventarioStockVenta");
+    return _validateStockCoherence(item);
+}
+
+export function InventarioStockVenta_beforeUpdate(item) {
+    if (!item || typeof item !== "object") return item;
+    _rejectActiveField(item, "InventarioStockVenta");
+    return _validateStockCoherence(item);
+}
+
+export function InventarioStockVenta_beforeRemove(item) {
+    return item;
+}
+
+function _validateStockCoherence(item) {
+    const stockOnHand = Number(item.stockOnHand);
+    const stockReserved = Number(item.stockReserved ?? 0);
+    const stockAvailable = Number(item.stockAvailable);
+
+    if (Number.isFinite(stockOnHand) && stockOnHand < 0) {
+        _schemaError("stockOnHand no puede ser negativo");
+    }
+    if (Number.isFinite(stockReserved) && stockReserved < 0) {
+        _schemaError("stockReserved no puede ser negativo");
+    }
+    if (Number.isFinite(stockOnHand) && Number.isFinite(stockAvailable)) {
+        if (Math.abs(stockOnHand - stockReserved - stockAvailable) > 0.001) {
+            _schemaError(
+                `stockAvailable (${stockAvailable}) debe ser stockOnHand (${stockOnHand}) - stockReserved (${stockReserved})`
+            );
+        }
+    }
+    return item;
+}
+
+// =============================================================================
+// BLOQUE 15 - COLECCIONES PROHIBIDAS (SSOT-09, SSOT-15)
+// =============================================================================
+
+export function FacturasRecibidas_beforeInsert() {
+    _fiscalError(
+        "FacturasRecibidas prohibida (SSOT-09). Registre compras en MovimientosCaja (fiscalRole=RECEPTOR) + LibroAsientosContablesDetalle."
+    );
+}
+
+export function FacturasRecibidas_beforeUpdate() {
+    _fiscalError("FacturasRecibidas prohibida (SSOT-09): no se admiten actualizaciones.");
+}
+
+export function FacturasRecibidas_beforeRemove() {
+    _fiscalError("FacturasRecibidas prohibida (SSOT-09): no se admiten eliminaciones.");
+}
+
+export function AsientosContables_beforeInsert() {
+    _fiscalError(
+        "AsientosContables prohibida (SSOT-09). Use LibroAsientosContablesDetalle."
+    );
+}
+
+export function AsientosContables_beforeUpdate() {
+    _fiscalError("AsientosContables prohibida (SSOT-09).");
+}
+
+export function AsientosContables_beforeRemove() {
+    _fiscalError("AsientosContables prohibida (SSOT-09).");
+}
+
+export function ConfiguracionFiscal_beforeInsert() {
+    _fiscalError(
+        "ConfiguracionFiscal prohibida (SSOT-09). Use DatosFiscales con recordType=CONFIG_SISTEMA."
+    );
+}
+
+export function ConfiguracionFiscal_beforeUpdate() {
+    _fiscalError("ConfiguracionFiscal prohibida (SSOT-09).");
+}
+
+export function ConfiguracionFiscal_beforeRemove() {
+    _fiscalError("ConfiguracionFiscal prohibida (SSOT-09).");
 }
