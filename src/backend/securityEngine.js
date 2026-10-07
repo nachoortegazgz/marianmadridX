@@ -16,9 +16,6 @@ CORRECTIONS APPLIED (ANEXO v8.1):
 =============================================================================
 */
 
-import { SECRETS, getSecret } from "backend/mmSecrets";
-import { JWT } from "backend/internalConfig";
-
 import { secrets } from "@wix/secrets";
 import { SECRETS } from "backend/mmSecrets";
 import { JWT, INTEGRITY } from "backend/internalConfig";

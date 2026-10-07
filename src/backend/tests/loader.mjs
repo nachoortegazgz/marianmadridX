@@ -172,13 +172,21 @@ export const transactions = fnProxy;
 export const media = fnProxy;
 export const crypto = fnProxy;
 export const members = { getCurrentMember: async () => null };
-export const secrets = { getSecretValue: async () => "mock-secret" };
 // Named SDK exports imported by backend code (offline stubs):
 export const availabilityTimeSlots = fnProxy;
 export const bookings = fnProxy;
 export const checkout = fnProxy;
 export const orders = fnProxy;
-export const elevate = fnProxy;
+// SDK v2 @wix/essentials namespace export: backend code (dataClient.js,
+// dataAccess.js, citasManager.web.js, bookingCore.js, bookingSaga.js) imports
+// { auth } and calls auth.elevate(fn) AT MODULE LOAD to wrap collection
+// operations. Real semantics: elevate returns a callable wrapper, so the stub
+// must return an invokable proxy (plain fnProxy is not callable as a bound op).
+export const auth = {
+  elevate: (fn) => (typeof fn === 'function' ? fn : fnProxy),
+  getContextualAuth: fnProxy,
+  getTokenInfo: async () => null,
+};
 export const createClient = () => fnProxy;
 export const getSecret = async () => "mock-secret";
 // SDK v2 @wix/secrets namespace export (ADR-06 Etapa C / T4): mmSecrets.js
@@ -343,9 +351,6 @@ export async function load(url, context, nextLoad) {
     return { format: 'module', source: WIXDATASDK_SOURCE, shortCircuit: true };
   }
   if (url.startsWith('mock:wix-data')) {
-
-  if (url.startsWith('mock:wix-data') || url === 'mock:@wix/data') {
-
     return { format: 'module', source: WIX_DATA_SOURCE, shortCircuit: true };
   }
   if (url.startsWith('mock:')) {
