@@ -15,7 +15,8 @@ const H = await import('backend/data');
 const IC = await import('backend/internalConfig');
 
 const VALID_CITA = () => ({
-  bookingId: 'BK-TEST-001',
+  bookingId: '00000000-0000-4000-8000-000000000001',
+  serviceId: '00000000-0000-4000-8000-000000000002',
   traceId: 'trace-test-001',
   bookingStatus: IC.BOOKING_STATUS.CONFIRMED,
   paymentStatus: IC.PAYMENT_STATUS.NOT_PAID,
@@ -32,12 +33,11 @@ test('HOOK-CITAS-01 valid simple cita passes insert/update', () => {
   assert.strictEqual(H.CitasF2_beforeUpdate(item), item);
 });
 
-test('HOOK-CITAS-02 invalid bookingStatus rejected', () => {
+test('HOOK-CITAS-02 non-canonical bookingStatus rejected', () => {
   const item = { ...VALID_CITA(), bookingStatus: 'CONFIRMADO' };
-  // normalizer de lectura convierte CONFIRMADO->CONFIRMED, por lo que debe PASAR.
-  assert.doesNotThrow(() => H.CitasF2_beforeInsert(item));
+  assert.throws(() => H.CitasF2_beforeInsert(item), /bookingStatus/);
   const bad = { ...VALID_CITA(), bookingStatus: 'ESTADO_INVENTADO' };
-  assert.throws(() => H.CitasF2_beforeInsert(bad), /VALIDATION_ERROR/);
+  assert.throws(() => H.CitasF2_beforeInsert(bad), /bookingStatus/);
 });
 
 test('HOOK-CITAS-03 missing traceId rejected (SSOT-12)', () => {
@@ -46,8 +46,8 @@ test('HOOK-CITAS-03 missing traceId rejected (SSOT-12)', () => {
   assert.throws(() => H.CitasF2_beforeInsert(item), /traceId/);
 });
 
-test('HOOK-CITAS-04 DUALF1/DUALF2 without pairToken rejected', () => {
-  for (const t of [IC.BOOKING_TYPE.DUALF1, IC.BOOKING_TYPE.DUALF2]) {
+test('HOOK-CITAS-04 DUAL_F1/DUAL_F2 without pairToken rejected', () => {
+  for (const t of [IC.BOOKING_TYPE.DUAL_F1, IC.BOOKING_TYPE.DUAL_F2]) {
     const item = { ...VALID_CITA(), bookingType: t };
     assert.throws(() => H.CitasF2_beforeInsert(item), /pairToken/);
     const ok = { ...item, pairToken: 'pair-abc' };
@@ -55,9 +55,9 @@ test('HOOK-CITAS-04 DUALF1/DUALF2 without pairToken rejected', () => {
   }
 });
 
-test('HOOK-CITAS-05 legacy Spanish payment status normalized on read', () => {
+test('HOOK-CITAS-05 legacy Spanish payment status rejected on write', () => {
   const item = { ...VALID_CITA(), paymentStatus: 'PAGADO' };
-  assert.doesNotThrow(() => H.CitasF2_beforeInsert(item));
+  assert.throws(() => H.CitasF2_beforeInsert(item), /paymentStatus/);
 });
 
 // -----------------------------------------------------------------------------
@@ -73,6 +73,14 @@ test('HOOK-APPEND-02 retired blocked-collection hooks are gone (ADR-02)', () => 
   assert.strictEqual(H.SecuenciaTickets_beforeUpdate, undefined);
   assert.strictEqual(H.InventarioStockVentaCierre_beforeUpdate, undefined);
   assert.strictEqual(H.InventarioStockVentaCierre_beforeRemove, undefined);
+});
+
+test('HOOK-MASTER-01 editable CMS catalogs have no content hooks', () => {
+  for (const collection of ['ServiciosCatalogo', 'MapaStaff', 'ComplementosCatalogo']) {
+    for (const operation of ['beforeInsert', 'beforeUpdate', 'beforeRemove']) {
+      assert.strictEqual(H[`${collection}_${operation}`], undefined);
+    }
+  }
 });
 
 // -----------------------------------------------------------------------------
@@ -147,18 +155,29 @@ test('HOOK-CLOCK-01 invalid clockEventType rejected', () => {
   }), /clockEventType/);
 });
 
+const VALID_CLOCK = () => ({
+  recordType: IC.RECORD_TYPE_HORARIOS.REGULAR,
+  resourceId: '00000000-0000-4000-8000-000000000003',
+  memberId: '00000000-0000-4000-8000-000000000004',
+  recordedAt: new Date(),
+  traceId: 't1',
+});
+
 test('HOOK-CLOCK-02 AJUSTE requires adjustmentReason', () => {
   assert.throws(() => H.RegistrosHorariosStaff_beforeInsert({
-    clockEventType: IC.TIMECLOCK_TYPE.AJUSTE, traceId: 't1',
+    ...VALID_CLOCK(), recordType: IC.RECORD_TYPE_HORARIOS.AJUSTE,
+    clockEventType: IC.CLOCK_EVENT_TYPE.AJUSTE, traceId: 't1',
   }), /adjustmentReason/);
   assert.doesNotThrow(() => H.RegistrosHorariosStaff_beforeInsert({
-    clockEventType: IC.TIMECLOCK_TYPE.AJUSTE, adjustmentReason: 'Correccion manual jornada', traceId: 't1',
+    ...VALID_CLOCK(), recordType: IC.RECORD_TYPE_HORARIOS.AJUSTE,
+    clockEventType: IC.CLOCK_EVENT_TYPE.AJUSTE, adjustmentReason: 'Correccion manual jornada', traceId: 't1',
   }));
 });
 
 test('HOOK-CLOCK-03 missing traceId rejected', () => {
   assert.throws(() => H.RegistrosHorariosStaff_beforeInsert({
-    clockEventType: IC.TIMECLOCK_TYPE.ENTRADA,
+    ...VALID_CLOCK(), traceId: undefined,
+    clockEventType: IC.CLOCK_EVENT_TYPE.ENTRADA,
   }), /traceId/);
 });
 

@@ -146,15 +146,28 @@ export const mocks = {
     info: () => {}, warn: () => {}, error: () => {}, debug: () => {},
     _calls: [],
   },
+  bookings: {},
+  availabilityTimeSlots: {},
+  checkout: {},
 };
 
 const GENERIC_STUB_SOURCE = `
+import { mocks as testMocks } from ${JSON.stringify(p2u(path.join(BACKEND_DIR, 'tests/loader.mjs')).href.replace(/\\/g, '/'))};
 const fnProxy = new Proxy(function () {}, {
   get: (t, p) => {
     if (p === 'then') return undefined;
     return fnProxy;
   },
   apply: () => fnProxy,
+});
+const sdkNamespace = (namespace) => new Proxy({}, {
+  get: (_target, property) => {
+    if (property === 'then') return undefined;
+    return (...args) => {
+      const implementation = testMocks[namespace]?.[property];
+      return typeof implementation === 'function' ? implementation(...args) : fnProxy(...args);
+    };
+  }
 });
 export const webMethod = (...args) => {
   // Real Velo semantics: webMethod(perm..., handler) returns the handler
@@ -173,9 +186,9 @@ export const media = fnProxy;
 export const crypto = fnProxy;
 export const members = { getCurrentMember: async () => null };
 // Named SDK exports imported by backend code (offline stubs):
-export const availabilityTimeSlots = fnProxy;
-export const bookings = fnProxy;
-export const checkout = fnProxy;
+export const availabilityTimeSlots = sdkNamespace('availabilityTimeSlots');
+export const bookings = sdkNamespace('bookings');
+export const checkout = sdkNamespace('checkout');
 export const orders = fnProxy;
 // SDK v2 @wix/essentials namespace export: backend code (dataClient.js,
 // dataAccess.js, citasManager.web.js, bookingCore.js, bookingSaga.js) imports

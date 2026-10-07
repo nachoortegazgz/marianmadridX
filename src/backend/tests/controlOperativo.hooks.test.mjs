@@ -19,6 +19,7 @@ function _base(controlType) {
     dedupeKey: `${controlType}:unit-test-key`,
     status: CONTROL_STATUS.ACTIVE,
     traceId: "trace-unit-001",
+    expiresAt: new Date(Date.now() + 60_000),
   };
 }
 
@@ -27,7 +28,7 @@ describe("ControlOperativo hooks (ADR-05)", () => {
     assert.doesNotThrow(() => ControlOperativo_beforeInsert(_base(CONTROL_TYPE.SLOT_LOCK)));
     assert.throws(
       () => ControlOperativo_beforeInsert({ ..._base("NOT_A_TYPE"), controlType: "NOT_A_TYPE" }),
-      /VALIDATION_ERROR.*controlType/,
+      /SCHEMA_VIOLATION.*controlType/,
     );
   });
 

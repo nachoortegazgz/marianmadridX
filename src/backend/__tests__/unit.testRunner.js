@@ -20,8 +20,8 @@ import {
   PAYMENT_STATUS,
   BOOKING_TYPE,
   CONCURRENCY,
-  ENTRY_STATUS,
-  ACCOUNT_NATURE
+  ACCOUNTING_ACCOUNT,
+  ACCOUNTING_ACCOUNT_NAME
 } from '../internalConfig.js';
 
 const ESTADO_CITA = BOOKING_STATUS;
@@ -35,8 +35,6 @@ const ENUMS = {
   INVOICE_TYPE: ['F1', 'F2', 'F3', 'R1', 'R2', 'R3', 'R4', 'R5'],
   REGIME_KEY: ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12', '13', '14', '15', '16', '17'],
   PAYMENT_METHOD: ['EFECTIVO', 'TARJETA', 'BIZUM', 'TRANSFERENCIA', 'ONLINE'],
-  ENTRY_STATUS: Object.values(ENTRY_STATUS),
-  ACCOUNT_NATURE: Object.values(ACCOUNT_NATURE)
 };
 
 // ============================================================================
@@ -151,8 +149,8 @@ export async function testBookingEnums() {
   assert.strictEqual(ESTADO_PAGO.PENDING_PAYMENT, 'PENDING_PAYMENT');
   assert.strictEqual(ESTADO_PAGO.REFUNDED, 'REFUNDED');
 
-  // Canonical booking types (SSOT): SIMPLE/DUALF1/DUALF2 only
-  assert.deepStrictEqual(Object.keys(BOOKING_TYPE), ['SIMPLE', 'DUALF1', 'DUALF2']);
+  // Canonical booking types (SSOT): SIMPLE/DUAL_F1/DUAL_F2 only
+  assert.deepStrictEqual(Object.keys(BOOKING_TYPE), ['SIMPLE', 'DUAL_F1', 'DUAL_F2']);
 
   return { testId: 'UNIT-ENUM-01', status: 'PASS', message: 'Enums CITAS_F2 alineados con internalConfig' };
 }
@@ -187,17 +185,13 @@ export async function testFiscalEnums() {
  * Test UNIT-ENUM-03: Enums contables PGC
  */
 export async function testAccountingEnums() {
-  // Canonical ENTRY_STATUS (internalConfig): 6 valores espanoles canonicos del CMS
-  const entryStatus = ENUMS.ENTRY_STATUS;
-  ['PENDIENTE', 'APROBADO', 'RECHAZADO', 'ASIENTADO', 'CANCELADO', 'BORRADOR'].forEach(v => {
-    assert.ok(entryStatus.includes(v), v + ' faltante');
+  // The current SSOT exposes PGC codes/names, not retired status/nature enums.
+  const accountCodes = Object.values(ACCOUNTING_ACCOUNT);
+  assert.ok(accountCodes.length > 0, 'Cuentas PGC faltantes');
+  accountCodes.forEach(code => {
+    assert.match(code, /^\d{6}$/, `Cuenta PGC no normalizada: ${code}`);
+    assert.ok(ACCOUNTING_ACCOUNT_NAME[code], `Nombre PGC faltante: ${code}`);
   });
-  assert.strictEqual(entryStatus.length, 6, 'ENTRY_STATUS debe tener 6 valores');
-  
-  // PGC canonical nature (internalConfig ACCOUNT_NATURE): DEUDORA/ACREEDORA
-  const accountNature = ENUMS.ACCOUNT_NATURE;
-  assert.ok(accountNature.includes('DEUDORA'), 'DEUDORA faltante');
-  assert.ok(accountNature.includes('ACREEDORA'), 'ACREEDORA faltante');
   
   return { testId: 'UNIT-ENUM-03', status: 'PASS', message: 'Enums contables PGC válidos' };
 }
@@ -350,4 +344,3 @@ export async function runAllUnitTests() {
   
   return summary;
 }
-
