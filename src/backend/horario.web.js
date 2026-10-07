@@ -1,582 +1,585 @@
 /*
 =============================================================================
 MODULE: backend/horario.web.js
-VERSION: v5009-FISCAL-V20.1
-BASE: v5007.0-FINAL + Directriz V20 (IDs nativa en ingles)
-RESPONSIBILITY: Registro horario laboral del personal. Fichajes inmutables,
-                estado de jornada, calculo de horas trabajadas y ajustes
-                administrativos. Cumplimiento Art. 34.9 ET y RD-ley 8/2019.
-STANDARDS: G10 ASCII Strict (0 non-ASCII characters).
-           Registros inmutables (beforeUpdate/beforeRemove bloqueados en data.js).
-           Minimizacion de datos personales (RGPD).
-
-FIXES APLICADOS v5009-FISCAL-V20.1:
-  - V20-01: import TIPO_FICHAJE -> TIMECLOCK_TYPE.
-  - V20-02: usos de TIPO_FICHAJE.* -> TIMECLOCK_TYPE.*.
-  - V20-03: NOTA DE AUDITORIA: el modulo escribe en RegistrosHorariosStaff
-            con campos propios (dayKey, monthKey, clockEventType, recordedAt,
-            recordedTime, signature, etc.). Estos campos se anaden al schema
-            V20.1-EXPANDED-v3. No hay renombrado funcional adicional.
-
-CORRECTIONS (heredadas v5007.0):
-  [HOR-01..HOR-05].
+VERSION: v8.1-SSOT-MASTER
+RESPONSIBILITY: Fichajes laborales (RD 8/2019). Append-only. Firma HMAC.
+CORRECTIONS: C-01 (sin active), C-03/C-04 (memberId), BUG-04 FIX (campos
+             inexistentes eliminados: employeeIdentifier/employeeName/
+             recordingName/deviceIp/type → recordType).
 =============================================================================
 */
 
-import { webMethod, Permissions } from "wix-web-module";
 import wixData from "wix-data";
+import { webMethod, Permissions } from "wix-web-module";
 import { currentMember } from "wix-members-backend";
 
 import {
-  BUSINESS_COLLECTIONS,
-
-  TIMECLOCK_TYPE,
-  SDK_CONFIG,
+    BUSINESS_COLLECTIONS,
+    CLOCK_EVENT_TYPE,
+    RECORD_TYPE_HORARIOS,
+    CLOCK_REGISTERED_BY,
+    REGISTROS_HORARIOS_FIELDS as F,
+    SDK_CONFIG,
 } from "backend/internalConfig";
 
 import {
-  makeTraceId,
-  _safeTrim,
-  _readDate,
-} from "public/mmUtils";
+    assertRegistrosHorariosStaff,
+    assertValidEnum,
+} from "backend/validation";
 
-import { logger } from "backend/logger";
-import { hmacSha256Hex } from "backend/securityEngine";
-import { getSecret } from "wix-secrets-backend";
-import { SECRETS } from "backend/mmSecrets";
+import {
+    findStaffByResourceId,
+    findStaffByMemberId,
+    getStaffDisplayName,
+} from "backend/staff";
+
 import { requireAdmin } from "backend/security";
-import { _toPublicError } from "backend/responseUtils";
-import { findStaff } from "backend/staff";
+import { signTimeclockRecord } from "backend/securityEngine";
+import { makeTraceId } from "public/mmUtils";
+import { logger } from "backend/logger";
 
 const log = logger;
 const REGISTROS_COL = BUSINESS_COLLECTIONS.REGISTROS_HORARIOS_STAFF;
-const MAPA_STAFF_COL = BUSINESS_COLLECTIONS.MAPA_STAFF;
 
 // =============================================================================
-// BLOQUE 1 - HELPERS INTERNOS
+// HELPERS DE ZONA HORARIA (Europe/Madrid, SSOT)
 // =============================================================================
 
 function _getMadridNow() {
-  return new Date();
+    return new Date(
+        new Date().toLocaleString("en-US", { timeZone: SDK_CONFIG.TZ })
+    );
 }
 
-function _getMadridDayKey(date) {
-  try {
-    return date.toLocaleDateString("sv-SE", { timeZone: SDK_CONFIG.TZ });
-  } catch (_) {
-    return date.toISOString().slice(0, 10);
-  }
+function _getMadridDayKey(d) {
+    const date = d || _getMadridNow();
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
 }
 
-function _getMadridMonthKey(date) {
-  try {
-    const parts = new Intl.DateTimeFormat("en-CA", {
-      timeZone: SDK_CONFIG.TZ,
-      year: "numeric",
-      month: "2-digit",
-    }).formatToParts(date);
-    const year = parts.find((p) => p.type === "year")?.value || "";
-    const month = parts.find((p) => p.type === "month")?.value || "";
-    return `${year}-${month}`;
-  } catch (_) {
-    return date.toISOString().slice(0, 7);
-  }
+function _getMadridMonthKey(d) {
+    const date = d || _getMadridNow();
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, "0");
+    return `${y}-${m}`;
 }
 
-function _getMadridTime(date) {
-  try {
-    const parts = new Intl.DateTimeFormat("en-CA", {
-      timeZone: SDK_CONFIG.TZ,
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-      hour12: false,
-    }).formatToParts(date);
-    const hour = parts.find((p) => p.type === "hour")?.value || "00";
-    const minute = parts.find((p) => p.type === "minute")?.value || "00";
-    const second = parts.find((p) => p.type === "second")?.value || "00";
-    return `${hour === "24" ? "00" : hour}:${minute}:${second}`;
-  } catch (_) {
-    return "00:00:00";
-  }
+function _getMadridTime(d) {
+    const date = d || _getMadridNow();
+    return date.toTimeString().slice(0, 8); // HH:MM:SS
 }
 
-async function _getCurrentMemberContext(traceId) {
-  try {
-    const member = await currentMember.getMember();
-    if (!member) return null;
-    return {
-      memberId: member._id,
-      email: (member.loginEmail || member.contactDetails?.email || "").toLowerCase(),
-    };
-  } catch (_) {
-    return null;
-  }
+function _safeTrim(v) {
+    return v === null || v === undefined ? "" : String(v).trim();
 }
+
+// =============================================================================
+// RESOLUCION DE CONTEXTO STAFF (C-03: memberId, sin guard active)
+// =============================================================================
 
 async function _resolveStaffContext(traceId) {
-  const memberCtx = await _getCurrentMemberContext(traceId);
-  if (!memberCtx) return null;
-
-  const staff = await findStaff(memberCtx.email);
-  if (!staff || !staff.active) return null;
-
-  return {
-    memberId: memberCtx.memberId,
-    email: memberCtx.email,
-    resourceId: staff.resourceId,
-    displayName: staff.displayName,
-    staffMemberId: staff.staffMemberId,
-  };
-}
-
-// =============================================================================
-// BLOQUE 2 - GET MY STAFF CONTEXT
-// =============================================================================
-
-export const getMyStaffContext = webMethod(Permissions.SiteMember, async (options = {}) => {
-  const traceId = options?.traceId || makeTraceId("staff-ctx");
-  try {
-    const staffCtx = await _resolveStaffContext(traceId);
-    if (!staffCtx) {
-      return { status: "ERROR", data: null, error: { code: "NOT_STAFF", message: "Current member is not active staff" } };
-    }
-    return {
-      status: "SUCCESS",
-      data: {
-        resourceId: staffCtx.resourceId,
-        displayName: staffCtx.displayName,
-        staffMemberId: staffCtx.staffMemberId,
-      },
-      error: null,
-    };
-  } catch (err) {
-    return { status: "ERROR", data: null, error: _toPublicError(err, "STAFF_CTX_FAIL") };
-  }
-});
-
-// =============================================================================
-// BLOQUE 3 - REGISTRAR FICHAJE
-// [HOR-01] Solo INSERT, nunca UPDATE
-// =============================================================================
-
-export const registrarFichaje = webMethod(Permissions.SiteMember, async (options = {}) => {
-  const traceId = options?.traceId || makeTraceId("fichaje");
-  try {
-    const clockEventType = _safeTrim(options?.clockEventType || options?.tipo).toUpperCase();
-    const validTypes = Object.values(TIMECLOCK_TYPE);
-    if (!validTypes.includes(clockEventType)) {
-      return { status: "ERROR", data: null, error: { code: "INVALID_CLOCK_TYPE", message: `Tipo de fichaje invalido. Validos: ${validTypes.join(", ")}` } };
-    }
-
-    const staffCtx = await _resolveStaffContext(traceId);
-    if (!staffCtx) {
-      return { status: "ERROR", data: null, error: { code: "NOT_STAFF", message: "Current member is not active staff" } };
-    }
-
-    const now = _getMadridNow();
-    const dayKey = _getMadridDayKey(now);
-    const monthKey = _getMadridMonthKey(now);
-    const recordedTime = _getMadridTime(now);
-
-    // [HOR-03] Firma HMAC del registro
-    let signature = "";
     try {
-      const fiscalKey = await getSecret(SECRETS.FISCAL_KEY);
-      const recordPayload = `${staffCtx.resourceId}|${clockEventType}|${now.toISOString()}|${dayKey}`;
-      signature = await hmacSha256Hex(fiscalKey, recordPayload);
-    } catch (_) {
-      signature = "SIGNATURE_UNAVAILABLE";
-    }
+        const member = await currentMember.getMember();
+        if (!member) return null;
 
-    // Verificar ultimo fichaje del dia para evitar duplicados
-    const lastFichajeRes = await wixData
-      .query(REGISTROS_COL)
-      .eq("resourceId", staffCtx.resourceId)
-      .eq("dayKey", dayKey)
-      .descending("recordedAt")
-      .limit(1)
-      .find({ suppressAuth: true });
+        const memberId = _safeTrim(member._id);
+        const email = _safeTrim(
+            member.loginEmail || member.contactDetails?.email
+        ).toLowerCase();
 
-    const lastFichaje = lastFichajeRes?.items?.[0];
-
-    // Validar secuencia logica de fichajes
-    if (clockEventType === TIMECLOCK_TYPE.SALIDA) {
-      if (!lastFichaje || lastFichaje.clockEventType === TIMECLOCK_TYPE.SALIDA) {
-        return { status: "ERROR", data: null, error: { code: "INVALID_SEQUENCE", message: "No se puede registrar SALIDA sin ENTRADA previa" } };
-      }
-    }
-    if (clockEventType === TIMECLOCK_TYPE.ENTRADA) {
-      if (lastFichaje && lastFichaje.clockEventType === TIMECLOCK_TYPE.ENTRADA) {
-        return { status: "ERROR", data: null, error: { code: "INVALID_SEQUENCE", message: "Ya existe una ENTRADA sin SALIDA correspondiente" } };
-      }
-    }
-
-    const record = {
-      resourceId: staffCtx.resourceId,
-      displayName: staffCtx.displayName,
-      staffMemberId: staffCtx.staffMemberId,
-      recordedAt: now,
-      recordedTime,
-      dayKey,
-      monthKey,
-      clockEventType,
-      type: "REGULAR",
-      employeeIdentifier: null,
-      employeeName: staffCtx.displayName,
-      registeredBy: "SELF",
-      registeredByMemberId: staffCtx.memberId,
-      recordingName: staffCtx.displayName,
-      adjustmentReason: null,
-      deviceIp: null,
-      deviceIpAddress: null,
-      signature,
-      meta: {},
-      traceId,
-    };
-
-    const saved = await wixData.insert(REGISTROS_COL, record, { suppressAuth: true });
-
-    log.info("Fichaje registrado", {
-      resourceId: staffCtx.resourceId,
-      clockEventType,
-      dayKey,
-      traceId,
-    });
-
-    return { status: "SUCCESS", data: saved, error: null };
-  } catch (err) {
-    log.error("registrarFichaje failed", { error: err?.message, traceId });
-    return { status: "ERROR", data: null, error: _toPublicError(err, "FICHAJE_FAIL") };
-  }
-});
-
-// =============================================================================
-// BLOQUE 4 - GET ESTADO JORNADA
-// =============================================================================
-
-export const getEstadoJornada = webMethod(Permissions.SiteMember, async (options = {}) => {
-  const traceId = options?.traceId || makeTraceId("estado-jornada");
-  try {
-    const staffCtx = await _resolveStaffContext(traceId);
-    if (!staffCtx) {
-      return { status: "ERROR", data: null, error: { code: "NOT_STAFF", message: "Current member is not active staff" } };
-    }
-
-    const today = _getMadridDayKey(_getMadridNow());
-
-    const fichajesRes = await wixData
-      .query(REGISTROS_COL)
-      .eq("resourceId", staffCtx.resourceId)
-      .eq("dayKey", today)
-      .ascending("recordedAt")
-      .find({ suppressAuth: true });
-
-    const fichajes = fichajesRes?.items || [];
-    const lastFichaje = fichajes.length > 0 ? fichajes[fichajes.length - 1] : null;
-
-    let estadoActual = "SIN_FICHAJE";
-    if (lastFichaje) {
-      if (lastFichaje.clockEventType === TIMECLOCK_TYPE.ENTRADA) estadoActual = "TRABAJANDO";
-      else if (lastFichaje.clockEventType === TIMECLOCK_TYPE.SALIDA) estadoActual = "FUERA";
-      else if (lastFichaje.clockEventType === TIMECLOCK_TYPE.PAUSA_INICIO) estadoActual = "EN_PAUSA";
-      else if (lastFichaje.clockEventType === TIMECLOCK_TYPE.PAUSA_FIN) estadoActual = "TRABAJANDO";
-    }
-
-    return {
-      status: "SUCCESS",
-      data: {
-        resourceId: staffCtx.resourceId,
-        displayName: staffCtx.displayName,
-        dayKey: today,
-        estadoActual,
-        fichajes: fichajes.map((f) => ({
-          clockEventType: f.clockEventType,
-          recordedAt: f.recordedAt,
-          recordedTime: f.recordedTime,
-        })),
-        totalFichajes: fichajes.length,
-      },
-      error: null,
-    };
-  } catch (err) {
-    return { status: "ERROR", data: null, error: _toPublicError(err, "ESTADO_JORNADA_FAIL") };
-  }
-});
-
-// =============================================================================
-// BLOQUE 5 - CALCULAR HORAS TRABAJADAS
-// =============================================================================
-
-export const calcularHorasTrabajadas = webMethod(Permissions.SiteMember, async (options = {}) => {
-  const traceId = options?.traceId || makeTraceId("calc-horas");
-  try {
-    const staffCtx = await _resolveStaffContext(traceId);
-    if (!staffCtx) {
-      return { status: "ERROR", data: null, error: { code: "NOT_STAFF", message: "Current member is not active staff" } };
-    }
-
-    const dayKey = _readDate(options?.dayKey) || _getMadridDayKey(_getMadridNow());
-
-    const fichajesRes = await wixData
-      .query(REGISTROS_COL)
-      .eq("resourceId", staffCtx.resourceId)
-      .eq("dayKey", dayKey)
-      .ascending("recordedAt")
-      .find({ suppressAuth: true });
-
-    const fichajes = fichajesRes?.items || [];
-
-    // Calcular horas trabajadas: ENTRADA-SALIDA menos PAUSA_INICIO-PAUSA_FIN
-    let totalMs = 0;
-    let entradaMs = null;
-    let pausaInicioMs = null;
-
-    for (const f of fichajes) {
-      const ts = new Date(f.recordedAt).getTime();
-      if (f.clockEventType === TIMECLOCK_TYPE.ENTRADA) {
-        entradaMs = ts;
-      } else if (f.clockEventType === TIMECLOCK_TYPE.SALIDA && entradaMs !== null) {
-        totalMs += ts - entradaMs;
-        entradaMs = null;
-      } else if (f.clockEventType === TIMECLOCK_TYPE.PAUSA_INICIO) {
-        pausaInicioMs = ts;
-      } else if (f.clockEventType === TIMECLOCK_TYPE.PAUSA_FIN && pausaInicioMs !== null) {
-        totalMs -= ts - pausaInicioMs;
-        pausaInicioMs = null;
-      }
-    }
-
-    const horasTrabajadas = Math.round((totalMs / 3600000) * 100) / 100;
-
-    return {
-      status: "SUCCESS",
-      data: {
-        resourceId: staffCtx.resourceId,
-        dayKey,
-        horasTrabajadas,
-        minutosTrabajados: Math.round(totalMs / 60000),
-        totalFichajes: fichajes.length,
-      },
-      error: null,
-    };
-  } catch (err) {
-    return { status: "ERROR", data: null, error: _toPublicError(err, "CALC_HORAS_FAIL") };
-  }
-});
-
-// =============================================================================
-// BLOQUE 6 - GET HISTORIAL FICHAJES
-// =============================================================================
-
-export const getHistorialFichajes = webMethod(Permissions.SiteMember, async (options = {}) => {
-  const traceId = options?.traceId || makeTraceId("hist-fichajes");
-  try {
-    const staffCtx = await _resolveStaffContext(traceId);
-    if (!staffCtx) {
-      return { status: "ERROR", data: null, error: { code: "NOT_STAFF", message: "Current member is not active staff" } };
-    }
-
-    const limit = Math.min(Number(options?.limit) || 30, 100);
-    const query = wixData
-      .query(REGISTROS_COL)
-      .eq("resourceId", staffCtx.resourceId);
-
-    if (options?.monthKey) {
-      query.eq("monthKey", options.monthKey);
-    }
-
-    const fichajesRes = await query
-      .descending("recordedAt")
-      .limit(limit)
-      .find({ suppressAuth: true });
-
-    return {
-      status: "SUCCESS",
-      data: {
-        resourceId: staffCtx.resourceId,
-        fichajes: fichajesRes?.items || [],
-        total: fichajesRes?.items?.length || 0,
-      },
-      error: null,
-    };
-  } catch (err) {
-    return { status: "ERROR", data: null, error: _toPublicError(err, "HISTORIAL_FAIL") };
-  }
-});
-
-// =============================================================================
-// BLOQUE 7 - REGISTRAR AJUSTE HORARIO (SOLO ADMIN)
-// [HOR-05] Ajustes solo por ADMIN con motivo obligatorio
-// =============================================================================
-
-export const registrarAjusteHorario = webMethod(Permissions.Admin, async (options = {}) => {
-  const traceId = options?.traceId || makeTraceId("ajuste-horario");
-  try {
-    await requireAdmin(traceId);
-
-    const targetResourceId = _safeTrim(options?.resourceId);
-    const clockEventType = _safeTrim(options?.clockEventType).toUpperCase();
-    const adjustmentReason = _safeTrim(options?.adjustmentReason || options?.motivo);
-    const recordedAtStr = options?.recordedAt || options?.fechaHora;
-
-    if (!targetResourceId) {
-      return { status: "ERROR", data: null, error: { code: "INVALID_RESOURCE", message: "resourceId del trabajador requerido" } };
-    }
-    if (!adjustmentReason || adjustmentReason.length < 5) {
-      return { status: "ERROR", data: null, error: { code: "REASON_REQUIRED", message: "Motivo de ajuste obligatorio (min 5 caracteres)" } };
-    }
-    if (!Object.values(TIMECLOCK_TYPE).includes(clockEventType)) {
-      return { status: "ERROR", data: null, error: { code: "INVALID_CLOCK_TYPE", message: "Tipo de fichaje invalido" } };
-    }
-
-    const recordedAt = recordedAtStr ? new Date(recordedAtStr) : _getMadridNow();
-    if (isNaN(recordedAt.getTime())) {
-      return { status: "ERROR", data: null, error: { code: "INVALID_DATE", message: "Fecha/hora invalida" } };
-    }
-
-    const staff = await findStaff(targetResourceId);
-    if (!staff) {
-      return { status: "ERROR", data: null, error: { code: "STAFF_NOT_FOUND", message: "Trabajador no encontrado" } };
-    }
-
-    const dayKey = _getMadridDayKey(recordedAt);
-    const monthKey = _getMadridMonthKey(recordedAt);
-    const recordedTime = _getMadridTime(recordedAt);
-
-    const adminCtx = await _getCurrentMemberContext(traceId);
-
-    let signature = "";
-    try {
-      const fiscalKey = await getSecret(SECRETS.FISCAL_KEY);
-      const recordPayload = `${targetResourceId}|AJUSTE|${recordedAt.toISOString()}|${dayKey}`;
-      signature = await hmacSha256Hex(fiscalKey, recordPayload);
-    } catch (_) {
-      signature = "SIGNATURE_UNAVAILABLE";
-    }
-
-    const record = {
-      resourceId: targetResourceId,
-      displayName: staff.displayName,
-      staffMemberId: staff.staffMemberId,
-      recordedAt,
-      recordedTime,
-      dayKey,
-      monthKey,
-      clockEventType,
-      type: "AJUSTE",
-      employeeIdentifier: null,
-      employeeName: staff.displayName,
-      registeredBy: "ADMIN",
-      registeredByMemberId: adminCtx?.memberId || null,
-      recordingName: adminCtx?.email || "ADMIN",
-      adjustmentReason,
-      deviceIp: null,
-      deviceIpAddress: null,
-      signature,
-      meta: { originalRequest: options },
-      traceId,
-    };
-
-    const saved = await wixData.insert(REGISTROS_COL, record, { suppressAuth: true });
-
-    log.info("Ajuste horario registrado", {
-      resourceId: targetResourceId,
-      clockEventType,
-      adjustmentReason,
-      traceId,
-    });
-
-    return { status: "SUCCESS", data: saved, error: null };
-  } catch (err) {
-    log.error("registrarAjusteHorario failed", { error: err?.message, traceId });
-    return { status: "ERROR", data: null, error: _toPublicError(err, "AJUSTE_FAIL") };
-  }
-});
-
-// =============================================================================
-// BLOQUE 8 - GET RESUMEN HORAS
-// =============================================================================
-
-export const getResumenHoras = webMethod(Permissions.SiteMember, async (options = {}) => {
-  const traceId = options?.traceId || makeTraceId("resumen-horas");
-  try {
-    const staffCtx = await _resolveStaffContext(traceId);
-    if (!staffCtx) {
-      return { status: "ERROR", data: null, error: { code: "NOT_STAFF", message: "Current member is not active staff" } };
-    }
-
-    const monthKey = options?.monthKey || _getMadridMonthKey(_getMadridNow());
-
-    const fichajesRes = await wixData
-      .query(REGISTROS_COL)
-      .eq("resourceId", staffCtx.resourceId)
-      .eq("monthKey", monthKey)
-      .ascending("recordedAt")
-      .limit(1000)
-      .find({ suppressAuth: true });
-
-    const fichajes = fichajesRes?.items || [];
-
-    // Agrupar por dia
-    const diasMap = {};
-    for (const f of fichajes) {
-      if (!diasMap[f.dayKey]) diasMap[f.dayKey] = [];
-      diasMap[f.dayKey].push(f);
-    }
-
-    const resumen = [];
-    for (const [dayKey, dayFichajes] of Object.entries(diasMap)) {
-      let totalMs = 0;
-      let entradaMs = null;
-      let pausaInicioMs = null;
-
-      for (const f of dayFichajes) {
-        const ts = new Date(f.recordedAt).getTime();
-        if (f.clockEventType === TIMECLOCK_TYPE.ENTRADA) {
-          entradaMs = ts;
-        } else if (f.clockEventType === TIMECLOCK_TYPE.SALIDA && entradaMs !== null) {
-          totalMs += ts - entradaMs;
-          entradaMs = null;
-        } else if (f.clockEventType === TIMECLOCK_TYPE.PAUSA_INICIO) {
-          pausaInicioMs = ts;
-        } else if (f.clockEventType === TIMECLOCK_TYPE.PAUSA_FIN && pausaInicioMs !== null) {
-          totalMs -= ts - pausaInicioMs;
-          pausaInicioMs = null;
+        // C-03: resolucion por memberId (prioritario)
+        let staff = await findStaffByMemberId(memberId, traceId);
+        if (!staff && email) {
+            const { findStaff } = await import("backend/staff");
+            staff = await findStaff(email, traceId);
         }
-      }
+        if (!staff) return null;
 
-      resumen.push({
-        dayKey,
-        horasTrabajadas: Math.round((totalMs / 3600000) * 100) / 100,
-        fichajes: dayFichajes.length,
-      });
+        // C-01: sin guard !staff.active (campo eliminado)
+        return {
+            memberId,
+            email,
+            resourceId: staff.resourceId,
+            staffMemberId: staff.memberId, // C-03: campo canonico memberId
+            displayName: getStaffDisplayName(staff),
+            rolWebsite: staff.rolWebsite, // C-02
+            rolBookings: staff.rolBookings, // C-02
+        };
+    } catch (error) {
+        log.error("_resolveStaffContext failed", {
+            traceId,
+            message: error?.message || String(error),
+        });
+        return null;
     }
-
-    const totalHorasMes = resumen.reduce((sum, d) => sum + d.horasTrabajadas, 0);
-
-    return {
-      status: "SUCCESS",
-      data: {
-        resourceId: staffCtx.resourceId,
-        monthKey,
-        totalHorasMes: Math.round(totalHorasMes * 100) / 100,
-        diasTrabajados: resumen.length,
-        detalle: resumen,
-      },
-      error: null,
-    };
-  } catch (err) {
-    return { status: "ERROR", data: null, error: _toPublicError(err, "RESUMEN_FAIL") };
-  }
-});
-
-// =============================================================================
-// BLOQUE 9 - VALIDAR SOLAPAMIENTO DE HORARIOS
-// =============================================================================
-
-export async function _validateScheduleNoOverlap(resourceId, dayOfWeek, startTime, endTime, excludeId) {
-  // Placeholder para validacion de solapamiento de horarios
-  // Se implementara en iteracion futura cuando se anada coleccion de horarios
-  return { valid: true };
 }
+
+// =============================================================================
+// WEBMETHODS PUBLICOS (BIBLIA 14.7)
+// =============================================================================
+
+export const getMyStaffContext = webMethod(
+    Permissions.SiteMember,
+    async (options = {}) => {
+        const traceId = _safeTrim(options?.traceId) || makeTraceId("staff-ctx");
+        try {
+            const ctx = await _resolveStaffContext(traceId);
+            if (!ctx) {
+                return {
+                    status: "ERROR",
+                    data: null,
+                    error: { code: "NOT_STAFF", message: "Miembro sin ficha staff activa" },
+                };
+            }
+            // DTO publico whitelist (RGPD): nunca notes/thirdPartyId
+            return {
+                status: "OK",
+                data: {
+                    resourceId: ctx.resourceId,
+                    memberId: ctx.staffMemberId,
+                    displayName: ctx.displayName,
+                    rolWebsite: ctx.rolWebsite,
+                    rolBookings: ctx.rolBookings,
+                },
+                traceId,
+            };
+        } catch (error) {
+            log.error("getMyStaffContext failed", { traceId, message: String(error) });
+            return {
+                status: "ERROR",
+                data: null,
+                error: { code: "INTERNAL", message: "Error resolviendo contexto staff" },
+                traceId,
+            };
+        }
+    }
+);
+
+export const registrarFichaje = webMethod(
+    Permissions.SiteMember,
+    async (options = {}) => {
+        const traceId = _safeTrim(options?.traceId) || makeTraceId("fichaje");
+        try {
+            const ctx = await _resolveStaffContext(traceId);
+            if (!ctx) {
+                return {
+                    status: "ERROR",
+                    data: null,
+                    error: { code: "NOT_STAFF", message: "Miembro sin ficha staff activa" },
+                };
+            }
+
+            const clockEventType = _safeTrim(options?.clockEventType).toUpperCase();
+            assertValidEnum(clockEventType, CLOCK_EVENT_TYPE, "clockEventType");
+
+            const now = _getMadridNow();
+            const dayKey = _getMadridDayKey(now);
+            const monthKey = _getMadridMonthKey(now);
+            const recordedTime = _getMadridTime(now);
+
+            // BUG-04 FIX: solo campos del schema canonico (cms.v8.1-FINAL)
+            const record = {
+                [F.RESOURCE_ID]: ctx.resourceId,
+                [F.MEMBER_ID]: ctx.staffMemberId, // C-04
+                [F.STAFF_NAME]: ctx.displayName,
+                [F.RECORDED_AT]: now,
+                [F.RECORDED_TIME]: recordedTime,
+                [F.DAY_KEY]: dayKey,
+                [F.MONTH_KEY]: monthKey,
+                [F.CLOCK_EVENT_TYPE]: clockEventType,
+                [F.RECORD_TYPE]: RECORD_TYPE_HORARIOS.REGULAR,
+                [F.REGISTERED_BY]: CLOCK_REGISTERED_BY.SELF,
+                [F.REGISTERED_BY_MEMBER_ID]: ctx.memberId,
+                [F.ADJUSTMENT_REASON]: null,
+                [F.DEVICE_IP_ADDRESS]: _safeTrim(options?.deviceIpAddress) || null,
+                [F.META]: { userAgent: _safeTrim(options?.userAgent) || null },
+                [F.TRACE_ID]: traceId,
+            };
+
+            // Firma HMAC de integridad (RD 8/2019)
+            record[F.SIGNATURE] = await signTimeclockRecord(record);
+
+            // Validacion centralizada (SSOT-07)
+            assertRegistrosHorariosStaff(record);
+
+            const saved = await wixData.insert(REGISTROS_COL, record, {
+                suppressAuth: true,
+            });
+
+            return {
+                status: "OK",
+                data: {
+                    id: saved._id,
+                    recordedAt: saved[F.RECORDED_AT],
+                    clockEventType: saved[F.CLOCK_EVENT_TYPE],
+                },
+                traceId,
+            };
+        } catch (error) {
+            log.error("registrarFichaje failed", { traceId, message: String(error) });
+            return {
+                status: "ERROR",
+                data: null,
+                error: {
+                    code: error?.message?.startsWith("SCHEMA_VIOLATION")
+                        ? "SCHEMA_VIOLATION"
+                        : "INTERNAL",
+                    message: error?.message || "Error registrando fichaje",
+                },
+                traceId,
+            };
+        }
+    }
+);
+
+export const getEstadoJornada = webMethod(
+    Permissions.SiteMember,
+    async (options = {}) => {
+        const traceId = _safeTrim(options?.traceId) || makeTraceId("estado-jornada");
+        try {
+            const ctx = await _resolveStaffContext(traceId);
+            if (!ctx) {
+                return { status: "ERROR", data: null, error: { code: "NOT_STAFF" } };
+            }
+
+            const dayKey = _safeTrim(options?.dayKey) || _getMadridDayKey();
+
+            const res = await wixData
+                .query(REGISTROS_COL)
+                .eq(F.RESOURCE_ID, ctx.resourceId)
+                .eq(F.DAY_KEY, dayKey)
+                .ascending(F.RECORDED_AT)
+                .find({ suppressAuth: true });
+
+            const fichajes = res?.items || [];
+            const ultimo = fichajes[fichajes.length - 1] || null;
+
+            let estado = "SIN_INICIAR";
+            if (ultimo) {
+                switch (ultimo[F.CLOCK_EVENT_TYPE]) {
+                    case CLOCK_EVENT_TYPE.ENTRADA:
+                        estado = "EN_JORNADA";
+                        break;
+                    case CLOCK_EVENT_TYPE.PAUSA_INICIO:
+                        estado = "EN_PAUSA";
+                        break;
+                    case CLOCK_EVENT_TYPE.PAUSA_FIN:
+                        estado = "EN_JORNADA";
+                        break;
+                    case CLOCK_EVENT_TYPE.SALIDA:
+                        estado = "JORNADA_FINALIZADA";
+                        break;
+                    default:
+                        estado = "EN_JORNADA";
+                }
+            }
+
+            return {
+                status: "OK",
+                data: {
+                    dayKey,
+                    estado,
+                    totalFichajes: fichajes.length,
+                    ultimoEvento: ultimo
+                        ? {
+                              tipo: ultimo[F.CLOCK_EVENT_TYPE],
+                              registradoEn: ultimo[F.RECORDED_AT],
+                          }
+                        : null,
+                },
+                traceId,
+            };
+        } catch (error) {
+            log.error("getEstadoJornada failed", { traceId, message: String(error) });
+            return { status: "ERROR", data: null, error: { code: "INTERNAL" }, traceId };
+        }
+    }
+);
+
+export const calcularHorasTrabajadas = webMethod(
+    Permissions.SiteMember,
+    async (options = {}) => {
+        const traceId = _safeTrim(options?.traceId) || makeTraceId("calc-horas");
+        try {
+            const ctx = await _resolveStaffContext(traceId);
+            if (!ctx) {
+                return { status: "ERROR", data: null, error: { code: "NOT_STAFF" } };
+            }
+
+            const dayKey = _safeTrim(options?.dayKey) || _getMadridDayKey();
+
+            const res = await wixData
+                .query(REGISTROS_COL)
+                .eq(F.RESOURCE_ID, ctx.resourceId)
+                .eq(F.DAY_KEY, dayKey)
+                .ascending(F.RECORDED_AT)
+                .find({ suppressAuth: true });
+
+            const fichajes = res?.items || [];
+            let minutosTrabajados = 0;
+            let entradaTs = null;
+            let pausaInicioTs = null;
+            let minutosPausa = 0;
+
+            for (const f of fichajes) {
+                const tipo = f[F.CLOCK_EVENT_TYPE];
+                const ts = new Date(f[F.RECORDED_AT]).getTime();
+
+                if (tipo === CLOCK_EVENT_TYPE.ENTRADA) {
+                    entradaTs = ts;
+                    minutosPausa = 0;
+                } else if (tipo === CLOCK_EVENT_TYPE.PAUSA_INICIO) {
+                    pausaInicioTs = ts;
+                } else if (tipo === CLOCK_EVENT_TYPE.PAUSA_FIN && pausaInicioTs) {
+                    minutosPausa += (ts - pausaInicioTs) / 60000;
+                    pausaInicioTs = null;
+                } else if (tipo === CLOCK_EVENT_TYPE.SALIDA && entradaTs) {
+                    minutosTrabajados += (ts - entradaTs) / 60000 - minutosPausa;
+                    entradaTs = null;
+                    minutosPausa = 0;
+                }
+            }
+
+            return {
+                status: "OK",
+                data: {
+                    dayKey,
+                    minutosTrabajados: Math.max(0, Math.round(minutosTrabajados)),
+                    horasTrabajadas: (Math.max(0, minutosTrabajados) / 60).toFixed(2),
+                    jornadaCerrada: entradaTs === null,
+                },
+                traceId,
+            };
+        } catch (error) {
+            log.error("calcularHorasTrabajadas failed", { traceId, message: String(error) });
+            return { status: "ERROR", data: null, error: { code: "INTERNAL" }, traceId };
+        }
+    }
+);
+
+export const getHistorialFichajes = webMethod(
+    Permissions.SiteMember,
+    async (options = {}) => {
+        const traceId = _safeTrim(options?.traceId) || makeTraceId("hist-fichajes");
+        try {
+            const ctx = await _resolveStaffContext(traceId);
+            if (!ctx) {
+                return { status: "ERROR", data: null, error: { code: "NOT_STAFF" } };
+            }
+
+            const limit = Math.min(Number(options?.limit) || 30, 100);
+            let query = wixData
+                .query(REGISTROS_COL)
+                .eq(F.RESOURCE_ID, ctx.resourceId);
+
+            if (_safeTrim(options?.monthKey)) {
+                query = query.eq(F.MONTH_KEY, _safeTrim(options.monthKey));
+            }
+
+            const res = await query
+                .descending(F.RECORDED_AT)
+                .limit(limit)
+                .find({ suppressAuth: true });
+
+            // DTO whitelist: nunca signature/meta completos, nunca deviceIpAddress
+            const items = (res?.items || []).map((f) => ({
+                registradoEn: f[F.RECORDED_AT],
+                horaRegistrada: f[F.RECORDED_TIME],
+                fichajeEventoTipo: f[F.CLOCK_EVENT_TYPE],
+                registroTipo: f[F.RECORD_TYPE],
+                diaClave: f[F.DAY_KEY],
+                ajusteMotivo: f[F.ADJUSTMENT_REASON] || null,
+            }));
+
+            return { status: "OK", data: { items, total: items.length }, traceId };
+        } catch (error) {
+            log.error("getHistorialFichajes failed", { traceId, message: String(error) });
+            return { status: "ERROR", data: null, error: { code: "INTERNAL" }, traceId };
+        }
+    }
+);
+
+export const registrarAjusteHorario = webMethod(
+    Permissions.Admin,
+    async (options = {}) => {
+        const traceId = _safeTrim(options?.traceId) || makeTraceId("ajuste-horario");
+        try {
+            await requireAdmin(traceId);
+
+            const adminCtx = await _resolveStaffContext(traceId);
+            const targetResourceId = _safeTrim(options?.resourceId);
+            const clockEventType = _safeTrim(options?.clockEventType).toUpperCase();
+            const adjustmentReason = _safeTrim(
+                options?.adjustmentReason || options?.motivo
+            );
+            const recordedAtStr = options?.recordedAt || options?.fechaHora;
+
+            if (!targetResourceId) {
+                return {
+                    status: "ERROR",
+                    data: null,
+                    error: { code: "INVALID_RESOURCE", message: "resourceId del trabajador requerido" },
+                };
+            }
+
+            assertValidEnum(clockEventType, CLOCK_EVENT_TYPE, "clockEventType");
+
+            if (!adjustmentReason) {
+                return {
+                    status: "ERROR",
+                    data: null,
+                    error: {
+                        code: "SCHEMA_VIOLATION",
+                        message: "adjustmentReason obligatorio en ajustes (RD 8/2019)",
+                    },
+                };
+            }
+
+            const staff = await findStaffByResourceId(targetResourceId, traceId);
+            if (!staff) {
+                return {
+                    status: "ERROR",
+                    data: null,
+                    error: { code: "STAFF_NOT_FOUND", message: "Trabajador no encontrado" },
+                };
+            }
+
+            const recordedAt = recordedAtStr ? new Date(recordedAtStr) : _getMadridNow();
+            if (isNaN(recordedAt.getTime())) {
+                return {
+                    status: "ERROR",
+                    data: null,
+                    error: { code: "INVALID_DATE", message: "recordedAt inválido" },
+                };
+            }
+
+            const dayKey = _getMadridDayKey(recordedAt);
+            const monthKey = _getMadridMonthKey(recordedAt);
+            const recordedTime = _getMadridTime(recordedAt);
+
+            const record = {
+                [F.RESOURCE_ID]: targetResourceId,
+                [F.MEMBER_ID]: staff.memberId, // C-04
+                [F.STAFF_NAME]: getStaffDisplayName(staff),
+                [F.RECORDED_AT]: recordedAt,
+                [F.RECORDED_TIME]: recordedTime,
+                [F.DAY_KEY]: dayKey,
+                [F.MONTH_KEY]: monthKey,
+                [F.CLOCK_EVENT_TYPE]: clockEventType,
+                [F.RECORD_TYPE]: RECORD_TYPE_HORARIOS.AJUSTE,
+                [F.REGISTERED_BY]: CLOCK_REGISTERED_BY.MANAGER,
+                [F.REGISTERED_BY_MEMBER_ID]: adminCtx?.memberId || null,
+                [F.ADJUSTMENT_REASON]: adjustmentReason,
+                [F.DEVICE_IP_ADDRESS]: null,
+                [F.META]: { originalRequest: { resourceId: targetResourceId, clockEventType, recordedAt: recordedAtStr } },
+                [F.TRACE_ID]: traceId,
+            };
+
+            record[F.SIGNATURE] = await signTimeclockRecord(record);
+            assertRegistrosHorariosStaff(record);
+
+            const saved = await wixData.insert(REGISTROS_COL, record, {
+                suppressAuth: true,
+            });
+
+            return {
+                status: "OK",
+                data: { id: saved._id, registradoEn: saved[F.RECORDED_AT] },
+                traceId,
+            };
+        } catch (error) {
+            log.error("registrarAjusteHorario failed", { traceId, message: String(error) });
+            return {
+                status: "ERROR",
+                data: null,
+                error: {
+                    code: error?.code === "ACCESS_DENIED" ? "ACCESS_DENIED" : "INTERNAL",
+                    message: error?.message || "Error registrando ajuste",
+                },
+                traceId,
+            };
+        }
+    }
+);
+
+export const getResumenHoras = webMethod(
+    Permissions.SiteMember,
+    async (options = {}) => {
+        const traceId = _safeTrim(options?.traceId) || makeTraceId("resumen-horas");
+        try {
+            const ctx = await _resolveStaffContext(traceId);
+            if (!ctx) {
+                return { status: "ERROR", data: null, error: { code: "NOT_STAFF" } };
+            }
+
+            const monthKey = _safeTrim(options?.monthKey) || _getMadridMonthKey();
+
+            const res = await wixData
+                .query(REGISTROS_COL)
+                .eq(F.RESOURCE_ID, ctx.resourceId)
+                .eq(F.MONTH_KEY, monthKey)
+                .ascending(F.RECORDED_AT)
+                .limit(1000)
+                .find({ suppressAuth: true });
+
+            const fichajes = res?.items || [];
+            const porDia = {};
+            let totalMinutos = 0;
+
+            for (const f of fichajes) {
+                const dk = f[F.DAY_KEY];
+                if (!porDia[dk]) porDia[dk] = { minutos: 0, eventos: 0 };
+                porDia[dk].eventos += 1;
+            }
+
+            // Calculo por dia
+            for (const dk of Object.keys(porDia)) {
+                const delDia = fichajes
+                    .filter((f) => f[F.DAY_KEY] === dk)
+                    .sort((a, b) => new Date(a[F.RECORDED_AT]) - new Date(b[F.RECORDED_AT]));
+
+                let entradaTs = null;
+                let pausaTs = null;
+                let pausaMin = 0;
+                let min = 0;
+
+                for (const f of delDia) {
+                    const tipo = f[F.CLOCK_EVENT_TYPE];
+                    const ts = new Date(f[F.RECORDED_AT]).getTime();
+                    if (tipo === CLOCK_EVENT_TYPE.ENTRADA) {
+                        entradaTs = ts;
+                        pausaMin = 0;
+                    } else if (tipo === CLOCK_EVENT_TYPE.PAUSA_INICIO) {
+                        pausaTs = ts;
+                    } else if (tipo === CLOCK_EVENT_TYPE.PAUSA_FIN && pausaTs) {
+                        pausaMin += (ts - pausaTs) / 60000;
+                        pausaTs = null;
+                    } else if (tipo === CLOCK_EVENT_TYPE.SALIDA && entradaTs) {
+                        min += (ts - entradaTs) / 60000 - pausaMin;
+                        entradaTs = null;
+                        pausaMin = 0;
+                    }
+                }
+                porDia[dk].minutos = Math.max(0, Math.round(min));
+                totalMinutos += porDia[dk].minutos;
+            }
+
+            return {
+                status: "OK",
+                data: {
+                    monthKey,
+                    totalMinutos,
+                    totalHoras: (totalMinutos / 60).toFixed(2),
+                    diasTrabajados: Object.keys(porDia).filter((d) => porDia[d].minutos > 0).length,
+                    detalle: porDia,
+                },
+                traceId,
+            };
+        } catch (error) {
+            log.error("getResumenHoras failed", { traceId, message: String(error) });
+            return { status: "ERROR", data: null, error: { code: "INTERNAL" }, traceId };
+        }
+    }
+);
