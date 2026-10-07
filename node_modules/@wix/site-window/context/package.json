@@ -1,0 +1,7 @@
+{
+  "sideEffects": false,
+  "main": "../dist/cjs/context.js",
+  "module": "../dist/esm/context.js",
+  "types": "../dist/types/context.d.ts",
+  "typesBundle": "../type-bundles/context.bundle.d.ts"
+}

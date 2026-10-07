@@ -1,0 +1,113 @@
+{
+  "name": "@wix/sdk-runtime",
+  "version": "0.3.62",
+  "license": "MIT",
+  "sideEffects": false,
+  "type": "module",
+  "exports": {
+    "./transformations/*": {
+      "import": "./build/transformations/*.js",
+      "require": "./cjs/build/transformations/*.js"
+    },
+    "./transformations": {
+      "import": "./build/transformations/index.js",
+      "require": "./cjs/build/transformations/index.js"
+    },
+    "./transform-error": {
+      "import": "./build/transform-error.js",
+      "require": "./cjs/build/transform-error.js"
+    },
+    "./rename-all-nested-keys": {
+      "import": "./build/rename-all-nested-keys.js",
+      "require": "./cjs/build/rename-all-nested-keys.js"
+    },
+    "./query-builder": {
+      "import": "./build/query-builder.js",
+      "require": "./cjs/build/query-builder.js"
+    },
+    "./context": {
+      "import": "./build/context.js",
+      "require": "./cjs/build/context.js"
+    },
+    "./rest-modules": {
+      "import": "./build/rest-modules.js",
+      "require": "./cjs/build/rest-modules.js"
+    },
+    "./host-modules": {
+      "import": "./build/host-modules.js",
+      "require": "./cjs/build/host-modules.js"
+    },
+    "./event-definition-modules": {
+      "import": "./build/event-definition-modules.js",
+      "require": "./cjs/build/event-definition-modules.js"
+    },
+    "./service-plugin-modules": {
+      "import": "./build/service-plugin-modules.js",
+      "require": "./cjs/build/service-plugin-modules.js"
+    }
+  },
+  "files": [
+    "build",
+    "cjs",
+    "rename-all-nested-keys",
+    "transform-error",
+    "transformations",
+    "query-builder",
+    "context",
+    "host-modules",
+    "rest-modules",
+    "event-definition-modules",
+    "service-plugin-modules"
+  ],
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc && tsc --project tsconfig.cjs.json",
+    "test": "vitest",
+    "lint": "eslint --max-warnings=0 .",
+    "lint:fix": "eslint --max-warnings=0 . --fix",
+    "typecheck:src": "tsc --noEmit",
+    "typecheck:test": "tsc --noEmit --project test/tsconfig.json",
+    "typecheck": "run typecheck:src && run typecheck:test"
+  },
+  "lint-staged": {
+    "*.{js,ts}": "yarn lint"
+  },
+  "dependencies": {
+    "@wix/sdk-context": "0.0.1",
+    "@wix/sdk-types": "^1.13.41"
+  },
+  "devDependencies": {
+    "@types/is-ci": "^3.0.4",
+    "@vitest/ui": "^1.6.1",
+    "eslint": "^8.57.1",
+    "eslint-config-sdk": "0.0.0",
+    "is-ci": "^3.0.1",
+    "jsdom": "^22.1.0",
+    "type-fest": "^4.41.0",
+    "typescript": "^5.9.2",
+    "vitest": "^1.6.1",
+    "vitest-teamcity-reporter": "^0.3.1"
+  },
+  "eslintConfig": {
+    "extends": "sdk"
+  },
+  "wix": {
+    "artifact": {
+      "groupId": "com.wixpress",
+      "artifactId": "sdk-runtime"
+    },
+    "validations": {
+      "source": [
+        "lint"
+      ],
+      "postDependenciesBuild": [
+        "typecheck:src",
+        "typecheck:test"
+      ]
+    }
+  },
+  "falconPackageHash": "1618bad6a10f746fffbc46fc36f08bffa009077bd51a002faa993ba3"
+}
