@@ -25,7 +25,7 @@ CORRECTIONS (heredadas v5007.0):
 
 import { webMethod, Permissions } from "wix-web-module";
 import wixData from "backend/dataClient";
-import { currentMember } from "wix-members-backend";
+import { currentMember } from "@wix/members";
 
 import {
   BUSINESS_COLLECTIONS,
@@ -42,8 +42,7 @@ import {
 
 import { logger } from "backend/logger";
 import { hmacSha256Hex } from "backend/securityEngine";
-import { getSecret } from "wix-secrets-backend";
-import { SECRETS } from "backend/mmSecrets";
+import { SECRETS, getSecret } from "backend/mmSecrets";
 import { requireAdmin } from "backend/security";
 import { _toPublicError } from "backend/responseUtils";
 import { findStaff } from "backend/staff";

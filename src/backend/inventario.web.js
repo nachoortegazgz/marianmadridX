@@ -62,8 +62,7 @@ import { normalizeError } from "backend/booking/bookingCore";
 import { logAuditEvent } from "backend/audit";
 
 import { hashSHA256, hmacSha256Hex } from "backend/securityEngine";
-import { getSecret } from "wix-secrets-backend";
-import { SECRETS } from "backend/mmSecrets";
+import { SECRETS, getSecret } from "backend/mmSecrets";
 
 const log = logger;
 const INVENTARIO_COL = BUSINESS_COLLECTIONS.INVENTARIO_STOCK_VENTA;

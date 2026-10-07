@@ -9,13 +9,12 @@ STANDARDS: G10 ASCII Strict.
 
 import { webMethod, Permissions } from "wix-web-module";
 import wixData from "backend/dataClient";
-import { getSecret } from "wix-secrets-backend";
 
 import {
   BUSINESS_COLLECTIONS,
   SDK_CONFIG,
 } from "backend/internalConfig";
-import { SECRETS } from "backend/mmSecrets";
+import { SECRETS, getSecret } from "backend/mmSecrets";
 import { makeTraceId, _safeTrim, withTimeout, _roundMoney } from "public/mmUtils";
 import { requireMarianManager } from "backend/security";
 import { _toPublicError } from "backend/responseUtils";

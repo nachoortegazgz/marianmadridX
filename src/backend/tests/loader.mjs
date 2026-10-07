@@ -173,6 +173,10 @@ export const orders = fnProxy;
 export const elevate = fnProxy;
 export const createClient = () => fnProxy;
 export const getSecret = async () => "mock-secret";
+// SDK v2 @wix/secrets namespace export (ADR-06 Etapa C / T4): mmSecrets.js
+// imports { secrets } and calls secrets.getSecretValue(name). Deterministic
+// offline value so consumers can run without a live site context.
+export const secrets = { getSecretValue: async (name) => "mock-secret:" + String(name) };
 export function _namedExportFallback(name) { return fnProxy; }
 const handler = { get: (t, p) => {
   if (p === 'then') return undefined;

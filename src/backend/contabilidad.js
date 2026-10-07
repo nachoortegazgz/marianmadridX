@@ -27,7 +27,6 @@ FIXES APLICADOS v5007.8 (heredados):
 */
 
 import wixData from "backend/dataClient";
-import { getSecret } from "wix-secrets-backend";
 import {
     BUSINESS_COLLECTIONS,
     SDK_CONFIG,
@@ -36,7 +35,7 @@ import {
     AEAT_INVOICE_TYPE,
     FISCAL_ROLE,
 } from "backend/internalConfig";
-import { SECRETS } from "backend/mmSecrets";
+import { SECRETS, getSecret } from "backend/mmSecrets";
 import { hmacSha256Hex, hashChain } from "backend/securityEngine";
 import { _roundMoney, _cleanText, _safeTrim, makeTraceId } from "public/mmUtils";
 import { logger } from "backend/logger";

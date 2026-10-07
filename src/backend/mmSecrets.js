@@ -50,3 +50,20 @@ export const SECRETS = Object.freeze({
     M365_GRAPH_LIST_ID: "M365_LIST_ID",
     M365_WEBHOOK_HMAC_KEY: "SECRET_M365_WEBHOOK_HMAC_KEY",
 });
+
+/*
+-----------------------------------------------------------------------------
+SDK v2 MIGRATION (ADR-06 Etapa C / ADR-10, T4): canonical getSecret wrapper.
+Legacy Velo used:  import { getSecret } from "wix-secrets-backend";
+@wix/secrets exposes secrets.getSecretValue(name) with the SAME positional
+signature, so this wrapper keeps every consumer call-site unchanged:
+    await getSecret(SECRETS.FISCAL_KEY)   ->   secrets.getSecretValue(name)
+The 8 consumers now import { SECRETS, getSecret } from "backend/mmSecrets".
+G10 ASCII strict. No secret values are ever hardcoded here (names only).
+-----------------------------------------------------------------------------
+*/
+import { secrets } from "@wix/secrets";
+
+export async function getSecret(name) {
+    return secrets.getSecretValue(name);
+}

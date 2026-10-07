@@ -17,7 +17,7 @@ FIXES APLICADOS v5009-FISCAL-V20.1:
 */
 
 import wixData from "backend/dataClient";
-import { currentMember } from "wix-members-backend";
+import { currentMember } from "@wix/members";
 
 import {
     BUSINESS_COLLECTIONS,

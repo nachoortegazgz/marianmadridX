@@ -23,7 +23,7 @@ cual. No se anaden webMethods nuevos.
 
 import { webMethod, Permissions } from "wix-web-module";
 import wixData from "backend/dataClient";
-import { orders } from "wix-ecom-backend";
+import { orders } from "@wix/ecom";
 
 import {
   BUSINESS_COLLECTIONS,

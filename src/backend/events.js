@@ -26,7 +26,6 @@ FIXES APLICADOS v5009-FISCAL (heredados):
 
 import wixData from "backend/dataClient";
 import { createClient } from "@wix/sdk";
-import { getSecret } from "wix-secrets-backend";
 
 import {
     makeTraceId,
@@ -58,7 +57,7 @@ import {
     IVA_RATES,
 } from "backend/internalConfig";
 
-import { SECRETS } from "backend/mmSecrets";
+import { SECRETS, getSecret } from "backend/mmSecrets";
 import { logger } from "backend/logger";
 import { normalizeError, _updateCitaSafe } from "backend/booking/bookingCore";
 import { queueFiscalRecovery } from "backend/cajas.web.js";
@@ -222,7 +221,7 @@ function _handleError(error, context, traceId) {
 }
 
 // ============================================================================
-// EXTRACCION FISCAL DEL PEDIDO — nomenclatura V20.1
+// EXTRACCION FISCAL DEL PEDIDO -- nomenclatura V20.1
 // ============================================================================
 
 function _extractFiscalDataFromOrder(order) {
@@ -470,7 +469,7 @@ export async function wixBookingsV2_onBookingConfirmed(rawBody) {
 }
 
 // ============================================================================
-// WEBHOOK: BOOKING CANCELED — RECTIFICATIVA via eventLog
+// WEBHOOK: BOOKING CANCELED -- RECTIFICATIVA via eventLog
 // ============================================================================
 
 export async function wixBookingsV2_onBookingCanceled(rawBody) {
@@ -594,7 +593,7 @@ export async function wixBookingsV2_onBookingCanceled(rawBody) {
 }
 
 // ============================================================================
-// WEBHOOK: ORDER PAYMENT STATUS UPDATED — via eventLog
+// WEBHOOK: ORDER PAYMENT STATUS UPDATED -- via eventLog
 // ============================================================================
 
 export async function wixEcom_onOrderPaymentStatusUpdated(rawBody) {
@@ -846,7 +845,7 @@ export async function wixEcom_onOrderPaymentStatusUpdated(rawBody) {
 }
 
 // ============================================================================
-// WEBHOOK: ORDER REFUNDED — via eventLog
+// WEBHOOK: ORDER REFUNDED -- via eventLog
 // ============================================================================
 
 export async function wixEcom_onOrderRefunded(rawBody) {

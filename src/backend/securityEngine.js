@@ -16,8 +16,7 @@ CORRECTIONS (heredadas):
 =============================================================================
 */
 
-import { getSecret } from "wix-secrets-backend";
-import { SECRETS } from "backend/mmSecrets";
+import { SECRETS, getSecret } from "backend/mmSecrets";
 import { JWT } from "backend/internalConfig";
 import { logger } from "backend/logger";
 

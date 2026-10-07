@@ -26,7 +26,6 @@ FIXES APLICADOS v5009-FISCAL (heredados):
 
 import { webMethod, Permissions } from "wix-web-module";
 import wixData from "backend/dataClient";
-import { getSecret } from "wix-secrets-backend";
 
 import {
     BUSINESS_COLLECTIONS,
@@ -43,7 +42,7 @@ import {
     FISCAL_ROLE,
 } from "backend/internalConfig";
 
-import { SECRETS } from "backend/mmSecrets";
+import { SECRETS, getSecret } from "backend/mmSecrets";
 import { requireCajero, rateLimiter } from "backend/security";
 
 import {
