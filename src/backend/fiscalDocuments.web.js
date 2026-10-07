@@ -10,6 +10,8 @@ STANDARDS: G10 ASCII Strict.
 import { webMethod, Permissions } from "wix-web-module";
 import wixData from "backend/dataClient";
 
+import { secrets } from "@wix/secrets";
+
 import {
   BUSINESS_COLLECTIONS,
   SDK_CONFIG,

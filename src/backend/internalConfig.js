@@ -1,10 +1,20 @@
 /*
 =============================================================================
 MODULE: backend/internalConfig.js
-VERSION: v5010-CLEAN
-BASE: v5009.3 + Eliminación Total Legacy + SSOT V20.1 Definitivo
+VERSION: v8.1-SSOT-MASTER
+BASE: v5010-CLEAN + BIBLIA v8.0-SSOT-MASTER + ANEXO SSOT v8.1
 RESPONSIBILITY: Single Source of Truth (SSOT) for backend configuration.
-STANDARDS: G10 ASCII Strict, Zero Deprecated Aliases, Zero Legacy.
+STANDARDS: G10 ASCII Strict. Zero Deprecated Aliases. Zero Legacy.
+
+CORRECTIONS APPLIED (ANEXO v8.1):
+  - C-01: Campo 'active' eliminado globalmente (ciclo de vida via 'status')
+  - C-02: staffRole → rolBookings + rolWebsite (enums separados)
+  - C-03: staffMemberId → memberId (GUID Wix Members)
+  - C-05: ServiciosCatalogo.locationId → Multi Reference Locations/Locations
+  - C-06: ServiciosCatalogo.mainMedia → Image nativo Wix
+  - ADR-17: Enums SNAKE_CASE con guiones bajos (DUAL_F1, NOT_PAID, SLOT_LOCK)
+  - BUG-02 FIX: JWT.EXPIRATION_MS (antes MS_EXPIRACION inconsistente)
+  - SSOT-01: Alias COLLECTIONS erradicado
 =============================================================================
 */
 
@@ -18,9 +28,7 @@ export const STAFF = Object.freeze({
         "07f7344f-e7e4-4c53-854b-47fd82ac8d40", // Andrea
         "9b905bfd-1a09-485d-9273-a24a20dfe648", // Alba
     ]),
-
     RESOURCE_TO_DISPLAY: Object.freeze({
-        // BIBLIA 3.2 canonical display names.
         "e556070a-6d6a-402e-8422-11133033ea76": "MARIAN MADRID",
         "07f7344f-e7e4-4c53-854b-47fd82ac8d40": "ANDREA STAFF",
         "9b905bfd-1a09-485d-9273-a24a20dfe648": "ALBA STAFF",
@@ -28,29 +36,23 @@ export const STAFF = Object.freeze({
 });
 
 // =============================================================================
-// BLOQUE 2 - COLECCIONES CMS CANONICAS (SEPARADAS POR DOMINIO)
-// CFG-10: Separación estricta Business vs Operacional
+// BLOQUE 2 - COLECCIONES CMS CANONICAS (SSOT-01, SSOT-02)
+// Alias COLLECTIONS ERRADICADO. Consumidores usan grupos explicitos.
 // =============================================================================
 
-// BIBLIA 11 / MATRIZ FASE3: consolidated CMS. MovimientosCaja, MapaStaff,
-// RegistrosHorariosStaff and ServiciosCatalogo are CORE SSOT collections; the
-// grouping below is organizational only (both groups are canonical access
-// points). ControlOperativo absorbs 8 operational collections (ADR-05/FASE3).
 export const BUSINESS_COLLECTIONS = Object.freeze({
     CAJA_ACTUAL: "CajaActual",
     CITAS_F2: "CitasF2",
     DATOS_FISCALES: "DatosFiscales",
     HISTORICO_CIERRES_Z: "HistoricoCierresZ",
     INVENTARIO_STOCK_VENTA: "InventarioStockVenta",
+    LIBRO_ASIENTOS_CONTABLES_DETALLE: "LibroAsientosContablesDetalle",
     CONTROL_OPERATIVO: "ControlOperativo",
-    // Core SSOT (grouping per FASE3 consolidation):
     MOVIMIENTOS_CAJA: "MovimientosCaja",
     MAPA_STAFF: "MapaStaff",
     REGISTROS_HORARIOS_STAFF: "RegistrosHorariosStaff",
     SERVICIOS_CATALOGO: "ServiciosCatalogo",
-    // Allowed accounting detail collection (BIBLIA 11; NOT the forbidden
-    // AsientosContables parent nor LibroRegistroFacturas* children).
-    LIBRO_ASIENTOS_CONTABLES_DETALLE: "LibroAsientosContablesDetalle",
+    COMPLEMENTOS_CATALOGO: "ComplementosCatalogo",
 });
 
 export const OPERATIONAL_COLLECTIONS = Object.freeze({
@@ -58,20 +60,25 @@ export const OPERATIONAL_COLLECTIONS = Object.freeze({
     MOVIMIENTOS_INVENTARIO: "MovimientosInventario",
 });
 
-// BIBLIA 6: record types used to segregate configuration rows inside shared
-// collections (e.g. DatosFiscales CONFIG_SISTEMA marker).
-export const RECORD_TYPE = Object.freeze({
-    CONFIG_SISTEMA: "CONFIG_SISTEMA",
-    MOVIMIENTO: "MOVIMIENTO",
-    FACTURA: "FACTURA",
-    TERCERO: "TERCERO",
+export const RESERVED_COLLECTIONS = Object.freeze({
+    COMPRAS_PROVEEDORES: "ComprasProveedores",
+    LINEAS_COMPRA_PROVEEDOR: "LineasCompraProveedor",
+    PRODUCTOS_CATALOGO: "ProductosCatalogo",
+    PRODUCTOS_VARIANTES: "ProductosVariantes",
+    UBICACIONES_INVENTARIO: "UbicacionesInventario",
+    PROVEEDORES_LISTA: "ProveedoresLista",
 });
 
-// FASE2: legacy umbrella alias ERRADICATED (MATRIZ H.5 / BIBLIA 6).
-// Consumers must use BUSINESS_COLLECTIONS / OPERATIONAL_COLLECTIONS /
-// RESERVED_COLLECTIONS / HISTORICAL_COLLECTIONS explicitly.
+export const HISTORICAL_COLLECTIONS = Object.freeze({
+    BOOKINGS_SERVICE_SYNC_QUEUE: "BookingsServiceSyncQueue",
+    M365_GRAPH_SYNC_QUEUE: "M365GraphSyncQueue",
+});
 
-// BIBLIA 6 / 10: collections that MUST NEVER be queried or written from app code.
+export const RETIRED_COLLECTIONS = Object.freeze([
+    "SecuenciaTickets",
+    "InventarioStockVentaCierre",
+]);
+
 export const FORBIDDEN_COLLECTIONS = Object.freeze([
     "AsientosContables",
     "EventosSistemaFacturacion",
@@ -83,109 +90,19 @@ export const FORBIDDEN_COLLECTIONS = Object.freeze([
     "LibroRegistroFacturasExpedidas",
 ]);
 
-// Stores-catalog collections managed outside the SSOT core (inventory domain).
-export const RESERVED_COLLECTIONS = Object.freeze({
-    COMPRAS_PROVEEDORES: "ComprasProveedores",
-    LINEAS_COMPRA_PROVEEDOR: "LineasCompraProveedor",
-    PRODUCTOS_CATALOGO: "ProductosCatalogo",
-    PRODUCTOS_VARIANTES: "ProductosVariantes",
-    UBICACIONES_INVENTARIO: "UbicacionesInventario",
-    // ADR-04 degraded (grep evidence: zero backend consumers in src/):
-    COMPLEMENTOS_CATALOGO: "ComplementosCatalogo",
-    PROVEEDORES_LISTA: "ProveedoresLista",
+export const WIX_APP_COLLECTIONS = Object.freeze({
+    BOOKINGS_SERVICES: "Bookings/Services",
+    BOOKINGS_SCHEDULE: "Bookings/Schedule",
+    BOOKINGS_STAFF: "Bookings/Staff",
+    LOCATIONS: "Locations/Locations",
+    STORES_PRODUCTS: "Stores/Products",
+    STORES_VARIANTS: "Stores/Variants",
+    STORES_ORDERS: "Stores/Orders",
+    STORES_INVENTORY: "Stores/InventoryItems",
+    MEMBERS_FULL_DATA: "Members/FullData",
+    MEMBERS_PRIVATE: "Members/PrivateMembersData",
+    MEMBERS_PUBLIC: "Members/PublicData",
 });
-
-// Queues tied to retired modules (BIBLIA 16.2): read-only historical access.
-export const HISTORICAL_COLLECTIONS = Object.freeze({
-    BOOKINGS_SERVICE_SYNC_QUEUE: "BookingsServiceSyncQueue",
-    M365_GRAPH_SYNC_QUEUE: "M365GraphSyncQueue",
-});
-
-// Collections formally retired by the consolidated CMS; blocked until schema
-// evidence confirms removal (ADR-02).
-export const BLOCKED_UNVERIFIED_COLLECTIONS = Object.freeze([
-    "SecuenciaTickets",
-    "InventarioStockVentaCierre",
-]);
-
-// FASE3 (BIBLIA 12 / ADR-05): ControlOperativo is the single 8-in-1 operational
-// control collection. Discriminator field: controlType.
-export const CONTROL_TYPE = Object.freeze({
-    SLOT_LOCK: "SLOT_LOCK",
-    WEBHOOK_EVENT: "WEBHOOK_EVENT",
-    RATE_LIMIT: "RATE_LIMIT",
-    BOOKING_TX: "BOOKING_TX",
-    COMPENSATION: "COMPENSATION",
-    ALERT: "ALERT",
-    DAYS_CACHE: "DAYS_CACHE",
-    DUAL_CACHE: "DUAL_CACHE",
-});
-
-export const CONTROL_STATUS = Object.freeze({
-    ACTIVE: "ACTIVE",
-    PENDING: "PENDING",
-    EXECUTED: "EXECUTED",
-    FAILED: "FAILED",
-    EXPIRED: "EXPIRED",
-    BLOCKED: "BLOCKED",
-    CLOSED: "CLOSED",
-    CANCELLED: "CANCELLED",
-});
-
-// FASE4-INV (SSOT 13.1): enum canónico de movimientos de inventario
-// (MovimientosInventario). Distinto de MOVEMENT_TYPE, que gobierna los
-// movimientos de caja (MovimientosCaja). magnitude deriva del signo de
-// quantityDelta: ENTRADA/AJUSTE_POSITIVO -> +1, SALIDA/MERMA -> -1.
-export const INVENTORY_MOVEMENT_TYPE = Object.freeze({
-    ENTRADA: "ENTRADA",
-    SALIDA: "SALIDA",
-    DEVOLUCION: "DEVOLUCION",
-    MERMA: "MERMA",
-    AJUSTE_POSITIVO: "AJUSTE_POSITIVO",
-    AJUSTE_NEGATIVO: "AJUSTE_NEGATIVO",
-    TRASLADO_ENTRADA: "TRASLADO_ENTRADA",
-    TRASLADO_SALIDA: "TRASLADO_SALIDA",
-});
-
-export const MAGNITUDE = Object.freeze({
-    POSITIVE: 1,
-    NEGATIVE: -1,
-    NEUTRAL: 0,
-});
-
-// FASE4-INV (ADR-09): alias funcionales en productores de inventario.
-// ONLINE_SALE es el token historico de las ventas online (pedido Wix) y
-// se normaliza a SALIDA; COMPRA/VENTA manuales se normalizan a
-// ENTRADA/SALIDA. La normalizacion ocurre SOLO en validation.js
-// (adaptador de lectura, EOL 31/12/2026); las escrituras nuevas deben
-// usar INVENTORY_MOVEMENT_TYPE directamente.
-export const INVENTORY_MOVEMENT_ALIAS = Object.freeze({
-    ONLINE_SALE: "SALIDA",
-    VENTA_ONLINE: "SALIDA",
-});
-
-// Tipos cuyo quantityDelta debe ser negativo en MovimientosInventario
-export const NEGATIVE_INVENTORY_MOVEMENT_TYPES = Object.freeze([
-    INVENTORY_MOVEMENT_TYPE.SALIDA,
-    INVENTORY_MOVEMENT_TYPE.MERMA,
-    INVENTORY_MOVEMENT_TYPE.AJUSTE_NEGATIVO,
-    INVENTORY_MOVEMENT_TYPE.TRASLADO_SALIDA,
-]);
-
-// Tipos cuyo quantityDelta debe ser positivo en MovimientosInventario
-export const POSITIVE_INVENTORY_MOVEMENT_TYPES = Object.freeze([
-    INVENTORY_MOVEMENT_TYPE.ENTRADA,
-    INVENTORY_MOVEMENT_TYPE.DEVOLUCION,
-    INVENTORY_MOVEMENT_TYPE.AJUSTE_POSITIVO,
-    INVENTORY_MOVEMENT_TYPE.TRASLADO_ENTRADA,
-]);
-
-// FASE3 (MATRIZ H.5 / SSOT-01): alias umbrella heredado ERRADICADO.
-// Los consumidores usan BUSINESS_COLLECTIONS / OPERATIONAL_COLLECTIONS /
-// RESERVED_COLLECTIONS / HISTORICAL_COLLECTIONS explicitamente. Las escrituras
-// operativas de las antiguas 8 colecciones se dirigen a
-// OPERATIONAL_COLLECTIONS.CONTROL_OPERATIVO con el discriminador controlType
-// (CONTROL_TYPE, ADR-05); ver tools/migrate-control-operativo.mjs.
 
 // =============================================================================
 // BLOQUE 3 - WIX APP IDS & API KEYS
@@ -211,19 +128,18 @@ export const API = Object.freeze({
 // =============================================================================
 
 export const SINGLETONS = Object.freeze({
-    CAJA: "CAJA_PRINCIPAL",
+    CAJA_PRINCIPAL: "CAJA_PRINCIPAL",
+    CAJA_SEQ: "CAJA_SEQ",
+    CONFIG_SISTEMA_FISCAL: "CONFIG_SISTEMA_FISCAL",
 });
 
 export const SDK_CONFIG = Object.freeze({
     TZ: "Europe/Madrid",
     LOCATION_ID: "7a12abfd-bf30-4847-bcdf-00dc573d4802",
-
-    // B3-FIX: TIME_SLOTS debe ser "BUSINESS" per dev.wix.com V2 API
     LOCATION_TYPES: Object.freeze({
         TIME_SLOTS: "BUSINESS",
         BOOKINGS_WRITER: "OWNER_BUSINESS",
     }),
-
     TIMEOUTS: Object.freeze({
         API_MS: 15000,
         BOOKING_CREATION_MS: 25000,
@@ -233,7 +149,6 @@ export const SDK_CONFIG = Object.freeze({
         WATCHDOG_MS: 30000,
         WEBHOOK_MS: 30000,
     }),
-
     CACHE: Object.freeze({
         SERVICES_TTL_MS: 600000,
         SLOTS_CACHE_TTL_MS: 120000,
@@ -243,13 +158,11 @@ export const SDK_CONFIG = Object.freeze({
         DAYS_CACHE_VERSION: 1,
         AVAILABILITY_CACHE_TTL_MS: 600000,
     }),
-
     SECURITY: Object.freeze({
         SECRET_CACHE_TTL_MS: 300000,
         RATE_LIMIT_CACHE_CLEANUP_TTL_MS: 60000,
         RATE_LIMIT_CACHE_MAX_ENTRIES: 5000,
     }),
-
     RATE_LIMIT: Object.freeze({
         MAX_REQUESTS: 20,
         WINDOW_MS: 5000,
@@ -259,7 +172,6 @@ export const SDK_CONFIG = Object.freeze({
         AVAILABILITY_REQUESTER_MAX_REQUESTS: 12,
         AVAILABILITY_GLOBAL_MAX_REQUESTS: 120,
     }),
-
     JOBS: Object.freeze({
         TIMEOUT_MS: 30000,
         AUDIT_RETENTION_DAYS: 90,
@@ -269,19 +181,11 @@ export const SDK_CONFIG = Object.freeze({
         FISCAL_RECOVERY_BATCH_SIZE: 25,
         HEALTH_CHECK_QUERY_LIMIT: 1000,
         FISCAL_DAILY_MAX_PAGES: 50,
-        BOOKINGS_SERVICE_SYNC_MAX_ATTEMPTS: 5,
-        BOOKINGS_SERVICE_SYNC_BATCH_SIZE: 20,
-        BOOKINGS_SERVICE_SYNC_BACKOFF_MS: 300000,
-        M365_GRAPH_SYNC_BATCH_SIZE: 20,
-        M365_GRAPH_SYNC_MAX_ATTEMPTS: 3,
-        M365_GRAPH_SYNC_BACKOFF_MS: 300000,
     }),
-
     EVENTS: Object.freeze({
         RETRY_ATTEMPTS: 3,
         RETRY_BASE_BACKOFF_MS: 1000,
     }),
-
     EXTERNAL_HTTP: Object.freeze({
         RATE_LIMIT_MAX_REQUESTS: 20,
         RATE_LIMIT_WINDOW_MS: 5000,
@@ -291,13 +195,9 @@ export const SDK_CONFIG = Object.freeze({
             "https://marianmadrid.es",
         ]),
     }),
-
     M365: Object.freeze({ ENABLED: false }),
     ACCOUNTING: Object.freeze({ ENABLED: false }),
-
-    // Flag explícito para activar/desactivar sync de servicios (Deuda #6 resuelta)
     SYNC_BOOKINGS_SERVICES_ENABLED: false,
-
     DOCUMENTS: Object.freeze({
         DEFAULT_MANAGER_EMAIL: "gestion@marianmadrid.es",
         MAX_EMAIL_ATTACHMENT_BYTES: 3145728,
@@ -322,227 +222,65 @@ export const CONCURRENCY = Object.freeze({
 });
 
 // =============================================================================
-// BLOQUE 6 - ENUMS DE NEGOCIO (SSOT COMPLETO)
-// Sin aliases, solo nombres canónicos en inglés/V20.1
+// BLOQUE 6 - JWT (BUG-02 FIX: nombre canonico EXPIRATION_MS)
 // =============================================================================
 
-export const REGIME_KEY = Object.freeze({
-    GENERAL: "GENERAL",
-    SIMPLIFIED: "SIMPLIFICADO",
-    MODULES: "MODULOS",
-    EQUIVALENCE: "EQUIVALENCIA",
-    EXPORT: "EXPORTACION",
-    INTRACOMMUNITY: "INTRACOMUNITARIO",
+export const JWT = Object.freeze({
+    ALGORITHM: "HS256",
+    EXPIRATION_MS: 1800000,
 });
 
-export const ENTRY_STATUS = Object.freeze({
-    PENDING: "PENDIENTE",
-    APPROVED: "APROBADO",
-    REJECTED: "RECHAZADO",
-    POSTED: "ASIENTADO",
-    CANCELLED: "CANCELADO",
-    DRAFT: "BORRADOR",
+// =============================================================================
+// BLOQUE 7 - ENUMS WIX CANONICOS (BIBLIA 9.2, SNAKE_CASE ADR-17)
+// =============================================================================
+
+export const BOOKING_STATUS = Object.freeze({
+    CREATED: "CREATED",
+    PENDING: "PENDING",
+    CONFIRMED: "CONFIRMED",
+    DECLINED: "DECLINED",
+    WAITING_LIST: "WAITING_LIST",
+    UPDATED: "UPDATED",
+    CANCELED: "CANCELED",
+    REFUNDED: "REFUNDED",
 });
 
-export const BALANCE_NATURE = Object.freeze({
-    DEUDORA: "DEUDORA",
-    ACREEDORA: "ACREEDORA",
-    SALDO_0: "SALDO_0",
+export const INACTIVE_BOOKING_STATUSES = Object.freeze([
+    BOOKING_STATUS.CANCELED,
+    BOOKING_STATUS.DECLINED,
+    "REJECTED",
+    "NOSHOW",
+]);
+
+export const PAYMENT_STATUS = Object.freeze({
+    UNDEFINED: "UNDEFINED",
+    NOT_PAID: "NOT_PAID",
+    PENDING_PAYMENT: "PENDING_PAYMENT",
+    PENDING_LEDGER: "PENDING_LEDGER",
+    PAID: "PAID",
+    PARTIALLY_PAID: "PARTIALLY_PAID",
+    REFUNDED: "REFUNDED",
+    PARTIALLY_REFUNDED: "PARTIALLY_REFUNDED",
+    EXEMPT: "EXEMPT",
 });
 
-export const RECONCILIATION_STATUS = Object.freeze({
-    PENDING: "PENDIENTE",
-    MATCHED: "COINCIDE",
-    DISCREPANCY: "DISCREPANCIA",
-    EXCLUDED: "EXCLUIDO",
-});
-
-export const SIF_EVENT_TYPE = Object.freeze({
-    SALE: "VENTA",
-    PURCHASE: "COMPRA",
-    EXPENSE: "GASTO",
-    ADJUSTMENT: "AJUSTE",
-    INVENTORY: "INVENTARIO",
-    PAYMENT: "PAGO",
-    INVOICE: "FACTURA",
-    BOOKING: "CITA",
-    CLOSURE: "CIERRE",
-    TAX_REPORT: "DECLARACION",
-});
-
-export const JOURNEY_TYPE = Object.freeze({
-    APPOINTMENT: "CITA",
-    SALE: "VENTA",
-    PURCHASE: "COMPRA",
-    PAYMENT: "PAGO",
-    INVOICE: "FACTURA",
-    ADJUSTMENT: "AJUSTE",
-    CLOSURE: "CIERRE",
-    SYNC: "SINCRONIZACION",
-});
-
-export const ACCOUNT_NATURE = Object.freeze({
-    DEUDORA: "DEUDORA",
-    ACREEDORA: "ACREEDORA",
-});
-
-export const CLOSING_TYPE = Object.freeze({
-    Z: "Z",
-    X: "X",
-    MENSUAL: "MENSUAL",
-    ANUAL: "ANUAL",
-});
-
-export const PACKAGE_STATUS = Object.freeze({
-    ACTIVE: "ACTIVO",
-    INACTIVE: "INACTIVO",
-    SUSPENDED: "SUSPENDIDO",
-    EXPIRED: "VENCIDO",
-    CANCELLED: "CANCELADO",
-});
-
-export const TAX_CODE = Object.freeze({
-    IVA21S: "IVA21S",
-    IVA21B: "IVA21B",
-    IVA10S: "IVA10S",
-    IVA10B: "IVA10B",
-    IVA4S: "IVA4S",
-    IVA4B: "IVA4B",
-    IRPF15: "IRPF15",
-    IRPF7: "IRPF7",
-    IRPF19: "IRPF19",
-    EXENTO: "EXENTO",
-    NS: "NO_SUJETO",
-});
-
-export const COMPENSATION_KIND = Object.freeze({
-    STOCK: "STOCK",
-    PAYMENT: "PAGO",
-    BOOKING: "CITA",
-    INVENTORY: "INVENTARIO",
-    FINANCIAL: "FINANCIERA",
-});
-
-export const COMPENSATION_STATUS = Object.freeze({
-    PENDING: "PENDIENTE",
-    EXECUTED: "EJECUTADO",
-    FAILED: "FALLIDO",
-    CANCELLED: "CANCELADO",
-    REVERSED: "REVERTIDO",
-});
-
-export const QUEUE_STATUS = Object.freeze({
-    PENDING: "PENDIENTE",
-    PROCESSING: "PROCESANDO",
-    COMPLETED: "COMPLETADO",
-    FAILED: "FALLIDO",
-    CANCELLED: "CANCELADO",
-});
-
-export const INVOICE_PAYMENT_STATUS = Object.freeze({
-    PENDING: "PENDIENTE",
-    PARTIAL: "PARCIAL",
-    PAID: "PAGADO",
-    OVERPAID: "SOBRAPAGO",
-    CANCELLED: "CANCELADO",
-});
-
-export const AEAT_PAYMENT_METHOD = Object.freeze({
-    CASH: "01",
-    CASH_ON_DELIVERY: "02",
-    CREDIT_CARD: "15",
-    BANK_TRANSFER: "20",
-    DIGITAL_WALLET: "28",
-    PAYPAL: "29",
-    SEPA_DIRECT_DEBIT: "30",
-    COUNTER_PAYMENT: "99",
-});
-
-export const RECEPTION_SOURCE = Object.freeze({
-    MANUAL: "MANUAL",
-    IMPORT: "IMPORTACION",
-    API: "API",
-    SYNC: "SINCRONIZACION",
-    AUTO: "AUTOMATICO",
-});
-
-export const VALIDATION_STATUS = Object.freeze({
-    VALID: "VALIDO",
-    INVALID: "INVALIDO",
-    WARNING: "ADVERTENCIA",
-    PENDING: "PENDIENTE",
-});
-
-// BIBLIA 11.2 / MATRIZ: canonical booking types (SIMPLE/DUALF1/DUALF2).
-// Legacy values NORMAL/DUAL/... are READ-ONLY migration inputs handled by
-// normalizeBookingType(); new writes MUST use these three values only.
+// BIBLIA 11.2 / ADR-17: SNAKE_CASE canonico (DUAL_F1, DUAL_F2)
 export const BOOKING_TYPE = Object.freeze({
     SIMPLE: "SIMPLE",
-    DUALF1: "DUALF1",
-    DUALF2: "DUALF2",
+    DUAL_F1: "DUAL_F1",
+    DUAL_F2: "DUAL_F2",
 });
 
-export const CHANNEL_TYPE = Object.freeze({
+// =============================================================================
+// BLOQUE 8 - ENUMS DE NEGOCIO (BIBLIA 9.3, SNAKE_CASE ADR-17)
+// =============================================================================
+
+export const PAYMENT_METHOD = Object.freeze({
+    EFECTIVO: "EFECTIVO",
+    TARJETA: "TARJETA",
+    BIZUM: "BIZUM",
     ONLINE: "ONLINE",
-    INSTORE: "TIENDA",
-    PHONE: "TELEFONO",
-    MOBILE: "MOVIL",
-    SOCIAL: "SOCIAL",
-    PARTNER: "SOCIOPROVEEDOR",
-});
-
-export const RECORD_SOURCE = Object.freeze({
-    SYSTEM: "SISTEMA",
-    USER: "USUARIO",
-    IMPORT: "IMPORTACION",
-    API: "API",
-    INTEGRATION: "INTEGRACION",
-});
-
-export const AEAT_SUBMISSION_STATUS = Object.freeze({
-    PENDING: "PENDIENTE",
-    SENT: "ENVIADO",
-    ACCEPTED: "ACEPTADO",
-    REJECTED: "RECHAZADO",
-    PROCESSED: "PROCESADO",
-    ERROR: "ERROR",
-});
-
-export const CLOSING_STATUS = Object.freeze({
-    OPEN: "ABIERTO",
-    CLOSED: "CERRADO",
-    RECONCILED: "RECONCILIADO",
-    LOCKED: "BLOQUEADO",
-});
-
-export const CLOCK_RECORD_TYPE = Object.freeze({
-    CHECK_IN: "ENTRADA",
-    CHECK_OUT: "SALIDA",
-    BREAK_START: "PAUSA_INICIO",
-    BREAK_END: "PAUSA_FIN",
-    ADJUSTMENT: "AJUSTE",
-});
-
-export const CLOCK_REGISTERED_BY = Object.freeze({
-    SELF: "AUTOMATICO",
-    MANAGER: "GESTOR",
-    SYSTEM: "SISTEMA",
-});
-
-export const AUDIT_LEVEL = Object.freeze({
-    INFO: "INFO",
-    WARN: "WARN",
-    ERROR: "ERROR",
-    CRITICAL: "CRITICO",
-});
-
-// Enums Base (Timeclock, Movement, Payment, etc.)
-export const TIMECLOCK_TYPE = Object.freeze({
-    ENTRADA: "ENTRADA",
-    SALIDA: "SALIDA",
-    PAUSA_INICIO: "PAUSA_INICIO",
-    PAUSA_FIN: "PAUSA_FIN",
-    AJUSTE: "AJUSTE",
+    TARJETA_REGALO: "TARJETA_REGALO",
 });
 
 export const MOVEMENT_TYPE = Object.freeze({
@@ -565,77 +303,468 @@ export const MOVEMENT_TYPE = Object.freeze({
     PAGO_PROVEEDOR: "PAGO_PROVEEDOR",
     ANTICIPO: "ANTICIPO",
     FONDO_INICIAL: "FONDO_INICIAL",
-    SERVICIO_PROFESIONAL: "SERVICIO_PROFESIONAL",
 });
 
-export const PAYMENT_METHOD = Object.freeze({
-    EFECTIVO: "EFECTIVO",
-    TARJETA: "TARJETA",
-    BIZUM: "BIZUM",
+// BIBLIA 9.3: MOVEMENT_TYPE_INVENTARIO canonico (6 valores)
+export const INVENTORY_MOVEMENT_TYPE = Object.freeze({
+    VENTA: "VENTA",
+    DEVOLUCION: "DEVOLUCION",
+    AJUSTE: "AJUSTE",
+    ENTRADA_STOCK: "ENTRADA_STOCK",
+    SALIDA_STOCK: "SALIDA_STOCK",
+    TRANSFERENCIA: "TRANSFERENCIA",
+});
+
+export const MAGNITUDE = Object.freeze({
+    POSITIVE: 1,
+    NEGATIVE: -1,
+    NEUTRAL: 0,
+});
+
+export const NEGATIVE_INVENTORY_MOVEMENT_TYPES = Object.freeze([
+    INVENTORY_MOVEMENT_TYPE.VENTA,
+    INVENTORY_MOVEMENT_TYPE.SALIDA_STOCK,
+]);
+
+export const POSITIVE_INVENTORY_MOVEMENT_TYPES = Object.freeze([
+    INVENTORY_MOVEMENT_TYPE.DEVOLUCION,
+    INVENTORY_MOVEMENT_TYPE.ENTRADA_STOCK,
+]);
+
+export const CHANNEL_TYPE = Object.freeze({
+    PRESENCIAL: "PRESENCIAL",
     ONLINE: "ONLINE",
-    TARJETA_REGALO: "TARJETA_REGALO",
-});
-
-export const IVA_RATES = Object.freeze({
-    GENERAL: 0.21,
-    REDUCIDO: 0.1,
-    SUPERREDUCIDO: 0.04,
-    EXENTO: 0,
 });
 
 export const CASH_REGISTER_STATUS = Object.freeze({
-    OPEN: "ABIERTA",
-    CLOSED: "CERRADA",
+    ABIERTA: "ABIERTA",
+    CERRADA: "CERRADA",
 });
 
-export const BOOKING_STATUS = Object.freeze({
-    CONFIRMED: "CONFIRMED",
-    // BIBLIA 12.2 canonico (orthography per plan, not legacy PENDING_PAYMENT).
-    PENDING: "PENDING",
-    CANCELED: "CANCELED",
-    REFUNDED: "REFUNDED",
+export const ITEM_NATURE = Object.freeze({
+    SERVICIO_PROPIO: "SERVICIO_PROPIO",
+    PRODUCTO_VENTA: "PRODUCTO_VENTA",
+    PRODUCTO_USO: "PRODUCTO_USO",
+    GASTO_FIJO: "GASTO_FIJO",
 });
 
-// FASE2: lista de compatibilidad para lecturas de filas legacy persistidas con
-// los valores antiguos del enum (solo lectura; escritura nueva usa BOOKING_*).
-export const LEGACY_BOOKING_STATUS_VALUES = Object.freeze([
-    "PENDING_PAYMENT",
-    "CANCELLED",
-]);
-
-// Lista de estados inactivos para ranking de recursos (CORE-08)
-export const INACTIVE_BOOKING_STATUSES = Object.freeze([
-    "CANCELED", "DECLINED", "REJECTED", "NOSHOW",
-    // legacy read-compat (no usar en escrituras nuevas)
-    "CANCELLED",
-]);
-
-export const PAYMENT_STATUS = Object.freeze({
-    NOT_PAID: "NOT_PAID",
-    PENDING_PAYMENT: "PENDING_PAYMENT",
-    PENDING_LEDGER: "PENDING_LEDGER",
-    PAID: "PAID",
-    REFUNDED: "REFUNDED",
-    PARTIALLY_REFUNDED: "PARTIALLY_REFUNDED",
-    EXEMPT: "EXEMPT",
+export const CATALOG_STATES = Object.freeze({
+    ACTIVO: "ACTIVO",
+    INACTIVO: "INACTIVO",
+    BORRADOR: "BORRADOR",
 });
 
-export const COLLABORATOR_ROLES = Object.freeze({
+// =============================================================================
+// BLOQUE 9 - ROLES (ANEXO v8.1 C-02: separacion Bookings vs Website)
+// COLLABORATOR_ROLES y STAFF_ROLE ELIMINADOS → sustituidos por ROL_WEBSITE
+// =============================================================================
+
+// Rol oficial Wix Bookings (permisos dentro de la app nativa)
+export const ROL_BOOKINGS = Object.freeze({
+    OWNER: "OWNER",
+    ADMIN: "ADMIN",
+    RECEPTIONIST: "RECEPTIONIST",
+    STAFF: "STAFF",
+});
+
+// Rol interno de negocio del sitio web (autorizacion interna SSOT-11)
+export const ROL_WEBSITE = Object.freeze({
     ADMIN: "ADMIN",
     GESTION: "GESTION",
     ESTILISTA: "ESTILISTA",
 });
 
+export const STAFF_ACCESS = Object.freeze({
+    ALLOWED_ROLES: Object.freeze([
+        ROL_WEBSITE.ADMIN,
+        ROL_WEBSITE.GESTION,
+        ROL_WEBSITE.ESTILISTA,
+    ]),
+    MARIAN_RESOURCE_ID: "e556070a-6d6a-402e-8422-11133033ea76",
+});
+
 // =============================================================================
-// BLOQUE 7 - CATALOGO Y ADDONS
+// BLOQUE 10 - ENUMS FISCALES AEAT
+// =============================================================================
+
+export const RECORD_TYPE = Object.freeze({
+    TERCERO: "TERCERO",
+    CONFIG_SISTEMA: "CONFIG_SISTEMA",
+});
+
+export const THIRD_PARTY_TYPE = Object.freeze({
+    CLIENTE: "CLIENTE",
+    PROVEEDOR: "PROVEEDOR",
+    STAFF: "STAFF",
+    AAPP: "AAPP",
+    MIXTO: "MIXTO",
+    EMISOR: "EMISOR",
+});
+
+export const TIPO_FACTURA = Object.freeze({
+    F1: "F1",
+    F2: "F2",
+    R1: "R1",
+    R2: "R2",
+    R3: "R3",
+    R4: "R4",
+    R5: "R5",
+});
+
+export const CORRECTION_REASON = Object.freeze({
+    NUMERO_SERIE: "NUMERO_SERIE",
+    OTRAS: "OTRAS",
+});
+
+export const VAT_ACCRUAL_STATUS = Object.freeze({
+    DEVENGADO: "DEVENGADO",
+    ANTICIPADO: "ANTICIPADO",
+    APLICACION_ANTICIPO: "APLICACION_ANTICIPO",
+});
+
+export const TIPO_RECTIFICATIVA = Object.freeze({
+    I: "I",
+    S: "S",
+});
+
+export const FISCAL_ROLE = Object.freeze({
+    EMISOR: "EMISOR",
+    RECEPTOR: "RECEPTOR",
+});
+
+export const EVENT_TYPE = Object.freeze({
+    VENTA_LINEA: "VENTA_LINEA",
+    COMPRA_LINEA: "COMPRA_LINEA",
+    CIERRE_Z: "CIERRE_Z",
+    AJUSTE: "AJUSTE",
+    RECTIFICATIVA: "RECTIFICATIVA",
+    MOV_STOCK: "MOV_STOCK",
+});
+
+export const ESTADO_ENVIO_AEAT = Object.freeze({
+    PENDIENTE: "PENDIENTE",
+    ENVIADO: "ENVIADO",
+    ACEPTADO: "ACEPTADO",
+    RECHAZADO: "RECHAZADO",
+});
+
+export const CODIGO_IMPUESTO = Object.freeze({
+    IVA_21: "IVA_21",
+    IVA_10: "IVA_10",
+    IVA_4: "IVA_4",
+    IVA_0: "IVA_0",
+    IRPF_15: "IRPF_15",
+    IRPF_19: "IRPF_19",
+    EXENTO: "EXENTO",
+});
+
+export const TIPO_IMPOSITIVO = Object.freeze({
+    GENERAL: 0.21,
+    REDUCIDO: 0.10,
+    SUPERREDUCIDO: 0.04,
+    EXENTO: 0,
+});
+
+export const TIPO_IMPOSITIVO_VALIDOS = Object.freeze([0, 0.04, 0.10, 0.21]);
+
+export const IVA_RATES = Object.freeze({
+    GENERAL: 0.21,
+    REDUCIDO: 0.10,
+    SUPERREDUCIDO: 0.04,
+    EXENTO: 0,
+});
+
+export const EU_VAT_PREFIXES = Object.freeze([
+    "AT", "BE", "BG", "CY", "CZ", "DE", "DK", "EE", "EL", "ES",
+    "FI", "FR", "HR", "HU", "IE", "IT", "LT", "LU", "LV", "MT",
+    "NL", "PL", "PT", "RO", "SE", "SI", "SK", "XI",
+]);
+
+export const CLAVE_REGIMEN_AEAT = Object.freeze([
+    "01", "02", "03", "04", "05", "06", "07", "08", "09", "10",
+    "11", "12", "13", "14", "15", "16", "17", "18", "19", "20",
+]);
+
+// =============================================================================
+// BLOQUE 11 - ENUMS OPERATIVOS (ControlOperativo, Horarios, Cierres)
+// =============================================================================
+
+export const CONTROL_TYPE = Object.freeze({
+    SLOT_LOCK: "SLOT_LOCK",
+    WEBHOOK_EVENT: "WEBHOOK_EVENT",
+    RATE_LIMIT: "RATE_LIMIT",
+    BOOKING_TX: "BOOKING_TX",
+    COMPENSATION: "COMPENSATION",
+    ALERT: "ALERT",
+    DAYS_CACHE: "DAYS_CACHE",
+    DUAL_CACHE: "DUAL_CACHE",
+});
+
+export const CONTROL_STATUS = Object.freeze({
+    ACTIVE: "ACTIVE",
+    PENDING: "PENDING",
+    EXECUTED: "EXECUTED",
+    FAILED: "FAILED",
+    EXPIRED: "EXPIRED",
+    BLOCKED: "BLOCKED",
+    CLOSED: "CLOSED",
+    CANCELLED: "CANCELLED",
+});
+
+export const COMPENSATION_KIND = Object.freeze({
+    STOCK: "STOCK",
+    PAGO: "PAGO",
+    CITA: "CITA",
+    INVENTARIO: "INVENTARIO",
+    FINANCIERA: "FINANCIERA",
+    CANCEL_BOOKING: "CANCEL_BOOKING",
+});
+
+export const COMPENSATION_STATUS = Object.freeze({
+    PENDIENTE: "PENDIENTE",
+    EJECUTADO: "EJECUTADO",
+    FALLIDO: "FALLIDO",
+    CANCELADO: "CANCELADO",
+    REVERTIDO: "REVERTIDO",
+});
+
+export const SEVERITY = Object.freeze({
+    INFO: "INFO",
+    WARNING: "WARNING",
+    ERROR: "ERROR",
+    CRITICAL: "CRITICAL",
+});
+
+export const CLOCK_EVENT_TYPE = Object.freeze({
+    ENTRADA: "ENTRADA",
+    SALIDA: "SALIDA",
+    PAUSA_INICIO: "PAUSA_INICIO",
+    PAUSA_FIN: "PAUSA_FIN",
+    AJUSTE: "AJUSTE",
+});
+
+export const RECORD_TYPE_HORARIOS = Object.freeze({
+    REGULAR: "REGULAR",
+    AJUSTE: "AJUSTE",
+});
+
+export const CLOCK_REGISTERED_BY = Object.freeze({
+    SELF: "AUTOMATICO",
+    MANAGER: "GESTOR",
+    SYSTEM: "SISTEMA",
+});
+
+export const RECORD_DOMAIN = Object.freeze({
+    CIERRE_Z: "CIERRE_Z",
+    CIERRE_INVENTARIO: "CIERRE_INVENTARIO",
+    PAQUETE_GESTORIA: "PAQUETE_GESTORIA",
+});
+
+export const CLOSING_TYPE = Object.freeze({
+    DIARIO: "DIARIO",
+    MENSUAL: "MENSUAL",
+    ANUAL: "ANUAL",
+    EXTRAORDINARIO: "EXTRAORDINARIO",
+    PAQUETE_GESTORIA: "PAQUETE_GESTORIA",
+});
+
+export const CLOSING_STATUS = Object.freeze({
+    ABIERTO: "ABIERTO",
+    CERRADO: "CERRADO",
+    VERIFICADO: "VERIFICADO",
+});
+
+export const PACKAGE_STATUS = Object.freeze({
+    PREPARED: "PREPARED",
+    SENT: "SENT",
+});
+
+export const ORIGEN_TIPO = Object.freeze({
+    MOVIMIENTO_CAJA: "MOVIMIENTO_CAJA",
+    ASIENTO_CONTABLE: "ASIENTO_CONTABLE",
+    EVENTO_SISTEMA_FACTURACION: "EVENTO_SISTEMA_FACTURACION",
+    CIERRE_Z: "CIERRE_Z",
+    RECTIFICATIVA: "RECTIFICATIVA",
+});
+
+// =============================================================================
+// BLOQUE 12 - ENUMS COMPLEMENTARIOS
+// =============================================================================
+
+export const PRICING_MODEL = Object.freeze({
+    FIJO: "FIJO",
+    POR_MINUTO: "POR_MINUTO",
+    POR_PERSONA: "POR_PERSONA",
+});
+
+export const DEPOSIT_TYPE = Object.freeze({
+    FIJO: "FIJO",
+    PORCENTAJE: "PORCENTAJE",
+});
+
+export const DIRECTION = Object.freeze({
+    ENTRADA: "ENTRADA",
+    SALIDA: "SALIDA",
+});
+
+export const PROJECTION_STATUS = Object.freeze({
+    PENDIENTE: "PENDIENTE",
+    OK: "OK",
+    ERROR: "ERROR",
+});
+
+// =============================================================================
+// BLOQUE 13 - FIELD KEYS CANONICOS (ANEXO v8.1 C-03)
+// =============================================================================
+
+export const BOOKING_FIELDS = Object.freeze({
+    BOOKING_ID: "bookingId",
+    STATUS: "bookingStatus",
+    PAYMENT_STATUS: "paymentStatus",
+    BOOKING_TYPE: "bookingType",
+    PAIR_TOKEN: "pairToken",
+    SERVICE_ID: "serviceId",
+    RESOURCE_ID: "resourceId",
+    STAFF_RESOURCE_ID: "staffResourceId",
+    SCHEDULE_ID: "scheduleId",
+    DATE_YMD: "dateYmd",
+    START_DATE: "startDate",
+    END_DATE: "endDate",
+    THIRD_PARTY_ID: "thirdPartyId",
+    CATALOG_ID: "catalogId",
+    CASH_MOVEMENT_ID: "cashMovementId",
+    FISCAL_DATA: "fiscalData",
+    INVOICING_DATE: "invoicingDate",
+    SOURCE_EVENT_ID: "sourceEventId",
+    CONTACT_DETAILS: "contactDetails",
+    REVISION: "revision",
+    TRACE_ID: "traceId",
+});
+
+// ANEXO v8.1 C-02/C-03: memberId (no staffMemberId), rolBookings + rolWebsite
+export const MAPA_STAFF_FIELDS = Object.freeze({
+    RESOURCE_ID: "resourceId",
+    MEMBER_ID: "memberId",
+    ROL_BOOKINGS: "rolBookings",
+    ROL_WEBSITE: "rolWebsite",
+    STAFF_NAME: "staffName",
+    EMAIL: "email",
+    THIRD_PARTY_ID: "thirdPartyId",
+    DISPLAY_NAME: "displayName",
+    SCHEDULE_ID: "scheduleId",
+    LOCATION_ID: "locationId",
+    LOCATION: "location",
+    PHONE: "phone",
+    NOTES: "notes",
+    TRACE_ID: "traceId",
+});
+
+export const REGISTROS_HORARIOS_FIELDS = Object.freeze({
+    RESOURCE_ID: "resourceId",
+    MEMBER_ID: "memberId", // ANEXO v8.1 C-04
+    RECORDED_AT: "recordedAt",
+    RECORDED_TIME: "recordedTime",
+    CLOCK_EVENT_TYPE: "clockEventType",
+    RECORD_TYPE: "recordType",
+    ADJUSTMENT_REASON: "adjustmentReason",
+    SIGNATURE: "signature",
+    DAY_KEY: "dayKey",
+    MONTH_KEY: "monthKey",
+    STAFF_NAME: "staffName",
+    REGISTERED_BY: "registeredBy",
+    REGISTERED_BY_MEMBER_ID: "registeredByMemberId",
+    DEVICE_IP_ADDRESS: "deviceIpAddress",
+    META: "meta",
+    TRACE_ID: "traceId",
+});
+
+// =============================================================================
+// BLOQUE 14 - CUENTAS PGC Y CONFIGURACION FISCAL
+// =============================================================================
+
+export const ACCOUNTING_ACCOUNT = Object.freeze({
+    CASH: "570000",
+    BANKS: "572000",
+    SERVICE_REVENUE: "705000",
+    VAT_OUTPUT: "477000",
+    VAT_INPUT: "472000",
+    SALES_RETURNS: "708000",
+    SUPPLIERS: "400000",
+    PURCHASES_EXPENSES: "600000",
+    SUSPENSE: "555000",
+    TAX_IRPF_WITHHOLDING_PAYABLE: "475100",
+    TAX_IRPF_WITHHOLDING_RECEIVABLE: "473000",
+    TAX_EQUIVALENCE_SURCHARGE: "475800",
+    CUSTOMER_ADVANCES: "438000",
+    INVENTORY: "300000",
+    CLIENTS: "430000",
+});
+
+export const ACCOUNTING_ACCOUNT_NAME = Object.freeze({
+    "570000": "Caja EUR",
+    "572000": "Bancos",
+    "705000": "Prestacion de Servicios",
+    "477000": "HP IVA Repercutido",
+    "472000": "HP IVA Soportado",
+    "708000": "Devoluciones de Ventas",
+    "400000": "Proveedores",
+    "600000": "Compra de Mercaderias",
+    "555000": "Cuenta Puente",
+    "475100": "HP Retenciones a Practicar",
+    "473000": "HP Retenciones Sufridas",
+    "475800": "HP Recargo de Equivalencia",
+    "438000": "Anticipos de Clientes",
+    "300000": "Existencias de Mercaderias",
+    "430000": "Clientes",
+});
+
+export const COMPUTER_SYSTEM = Object.freeze({
+    computerSystemName: "Marian Madrid Velo",
+    computerSystemId: "MM-VELO-001",
+    version: "v8.1",
+    installationNumber: "1",
+    possibleUseOnlyVerifactu: "S",
+    possibleUseMultiOT: "N",
+    multipleOTIndicator: "N",
+    producerTaxId: null,
+    producerLegalName: null,
+});
+
+export const INTEGRITY = Object.freeze({
+    SCHEMA_VERSION: "v8.1",
+    ALGORITHM_VERSION: "SHA256-v1",
+    LEDGER_SCHEMA_VERSION: "LEDGER_V5_FISCAL",
+    ENTRY_SCHEMA_VERSION: "ENTRY_V1",
+    GENESIS_HASH: "GENESIS_HASH_MM_2024",
+    INTEGRITY_ALGORITHM_VERSION: "HMAC_SHA256_V1",
+});
+
+export const FISCAL_LIMITS = Object.freeze({
+    CASHPAYMENT_MAX_EUR: 1000,
+    MONEY_EPSILON: 0.02,
+    ACCOUNTING_EPSILON: 0.005,
+    MAX_AMOUNT_PER_INVOICE: 100000,
+    MAX_AMOUNT_PER_DAY: 500000,
+    MAX_INVOICES_PER_DAY: 1000,
+    MAX_ITEMS_PER_INVOICE: 100,
+    MAX_QUANTITY_PER_ITEM: 99999,
+    MIN_DATE: "2020-01-01",
+    MAX_DATE: "2030-12-31",
+});
+
+export const IRPF_WITHHOLDING_RATE = Object.freeze({
+    PROFESIONALES_GENERAL: 0.15,
+    PROFESIONALES_PRIMEROS_3_ANOS: 0.07,
+    MODULOS: 0.01,
+    NINGUNA: 0,
+});
+
+// =============================================================================
+// BLOQUE 15 - CONFIGURACION DE CATALOGO Y SLOTS
 // =============================================================================
 
 export const CATALOG_CONFIG = Object.freeze({
-    STATES: Object.freeze({
-        ACTIVO: "ACTIVO",
-        INACTIVO: "INACTIVO",
-        BORRADOR: "BORRADOR",
-    }),
+    STATES: CATALOG_STATES,
     CURRENCY: "EUR",
     MAX_TITLE_LENGTH: 160,
     MAX_SUMMARY_LENGTH: 120,
@@ -654,49 +783,6 @@ export const BOOKINGS_ADDON_CONFIG = Object.freeze({
     ACTIVE_NATIVE_IDS: Object.freeze([]),
 });
 
-// =============================================================================
-// BLOQUE 8 - JWT Y CAMPOS
-// =============================================================================
-
-export const JWT = Object.freeze({
-    ALGORITHM: "HS256",
-    EXPIRATION_MS: 1800000,
-});
-
-export const BOOKING_FIELDS = Object.freeze({
-    // ADR-06: canonical physical field is bookingStatus (MATRIZ G). Legacy
-    // "status" rows are migrated by tools/migrate-citasf2-field.js.
-    STATUS: "bookingStatus",
-    PAYMENT_STATUS: "paymentStatus",
-    PAIR_TOKEN: "pairToken",
-    SERVICE_ID: "serviceId",
-    RESOURCE_ID: "resourceId",
-    BOOKING_ID: "bookingId",
-    DATE_YMD: "dateYmd",
-    META: "meta",
-    CUSTOMER_ID: "customerId",
-    START_DATE: "startDate",
-    END_DATE: "endDate",
-    DURATION_MINUTES: "durationMinutes",
-    PRICE: "price",
-    CURRENCY: "currency",
-    CREATED_DATE: "createdDate",
-    UPDATED_DATE: "updatedDate",
-    CANCELLED_DATE: "cancelledDate",
-    REFUNDED_DATE: "refundedDate",
-    PAYMENT_METHOD: "paymentMethod",
-    NOTES: "notes",
-    // MATRIZ B alias "addons" ERRADICADO (SSOT v7.0 FASE4): el campo canonico
-    // de add-ons embebidos es addOnOptions en ServiciosCatalogo; CitasF2 no
-    // persiste este campo y ningun consumidor usaba BOOKING_FIELDS.ADDONS.
-    CUSTOM_FIELDS: "customFields",
-});
-
-export const STAFF_ACCESS = Object.freeze({
-    ALLOWED_ROLES: Object.freeze(["ADMIN", "GESTION", "ESTILISTA"]),
-    MARIAN_RESOURCE_ID: "e556070a-6d6a-402e-8422-11133033ea76",
-});
-
 export const CURRENCY_CONFIG = Object.freeze({
     DISPLAY_CURRENCY: "EUR",
     DECIMALS: 2,
@@ -705,175 +791,34 @@ export const CURRENCY_CONFIG = Object.freeze({
 export const STAFF_DEFAULT_NAME = "Profesional";
 
 // =============================================================================
-// BLOQUE 9 - CUENTAS PGC Y FISCALES
+// BLOQUE 16 - VALIDATION SETS (CFG-13)
 // =============================================================================
 
-export const ACCOUNTING_ACCOUNT = Object.freeze({
-    CASH: "570000",
-    BANKS: "572000",
-    SERVICE_REVENUE: "705000",
-    VAT_OUTPUT: "477000",
-    VAT_INPUT: "472000",
-    SALES_RETURNS: "708000",
-    SUPPLIERS: "400000",
-    PURCHASES_EXPENSES: "600000",
-    SUSPENSE: "555000",
-    TAX_IRPF_WITHHOLDING_PAYABLE: "475100",
-    TAX_IRPF_WITHHOLDING_RECEIVABLE: "473000",
-    TAX_EQUIVALENCE_SURCHARGE: "475800",
-    CUSTOMER_ADVANCES: "438000",
-    INVENTORY: "300000", // Añadido para v5010-CLEAN
-
-    CLIENTS: "430000", // PGC 430000 Clients (FASE4: requerido por CUENTAS_PGC_CANONICAS)
-});
-
-// Nombres legibles para las cuentas (SSOT)
-export const ACCOUNTING_ACCOUNT_NAME = Object.freeze({
-    "570000": "Caja EUR",
-    "572000": "Bancos",
-    "705000": "Prestación de Servicios",
-    "477000": "HP IVA Repercutido",
-    "472000": "HP IVA Soportado",
-    "708000": "Devoluciones de Ventas",
-    "400000": "Proveedores",
-    "600000": "Compra de Mercaderías",
-    "555000": "Cuenta Puente",
-    "475100": "HP Retenciones a Practicar",
-    "473000": "HP Retenciones Sufridas",
-    "475800": "HP Recargo de Equivalencia",
-    "438000": "Anticipos de Clientes",
-    "300000": "Existencias de Mercaderías",
-});
-
-export const AEAT_INVOICE_TYPE = Object.freeze({
-    F1: "F1",
-    F2: "F2",
-    F3: "F3",
-    R1: "R1",
-    R2: "R2",
-    R3: "R3",
-    R4: "R4",
-    R5: "R5",
-});
-
-export const CORRECTION_REASON = Object.freeze({
-    NUMERO_SERIE: "01",
-    SERIE: "02",
-    BASE_IMPONIBLE: "03",
-    CUOTA: "04",
-    FECHA: "05",
-    IDENTIFICACION: "06",
-    DESCUENTO: "07",
-    DESTINATARIO: "08",
-    OTRAS: "09",
-});
-
-export const IRPF_WITHHOLDING_RATE = Object.freeze({
-    PROFESIONALES_GENERAL: 0.15,
-    PROFESIONALES_PRIMEROS_3_ANOS: 0.07,
-    MODULOS: 0.01,
-    NINGUNA: 0,
-});
-
-export const VAT_ACCRUAL_STATUS = Object.freeze({
-    DEVENGADO: "DEVENGADO",
-    ANTICIPADO: "ANTICIPADO",
-    APLICACION_ANTICIPO: "APLICACION_ANTICIPO",
-});
-
-export const FISCAL_ROLE = Object.freeze({
-    EMISOR: "EMISOR",
-    RECEPTOR: "RECEPTOR",
-});
-
-export const EU_VAT_PREFIXES = Object.freeze([
-    "AT", "BE", "BG", "CY", "CZ", "DE", "DK", "EE", "EL", "ES",
-    "FI", "FR", "HR", "HU", "IE", "IT", "LT", "LU", "LV", "MT",
-    "NL", "PL", "PT", "RO", "SE", "SI", "SK", "XI",
-]);
-
-export const EVENT_TYPE = Object.freeze({
-    VENTA_LINEA: "VENTA_LINEA",
-    COMPRA_LINEA: "COMPRA_LINEA",
-    CIERRE_Z: "CIERRE_Z",
-    AJUSTE: "AJUSTE",
-    RECTIFICATIVA: "RECTIFICATIVA",
-    MOV_STOCK: "MOV_STOCK",
-});
-
-export const ITEM_NATURE = Object.freeze({
-    SERVICIO_PROPIO: "SERVICIO_PROPIO",
-    PRODUCTO_VENTA: "PRODUCTO_VENTA",
-    PRODUCTO_USO: "PRODUCTO_USO",
-    GASTO_FIJO: "GASTO_FIJO",
-});
-
-export const THIRD_PARTY_TYPE = Object.freeze({
-    CLIENTE: "CLIENTE",
-    PROVEEDOR: "PROVEEDOR",
-    STAFF: "STAFF",
-    AAPP: "AAPP",
-    MIXTO: "MIXTO",
-});
-
-export const PROJECTION_STATUS = Object.freeze({
-    PENDIENTE: "PENDIENTE",
-    OK: "OK",
-    ERROR: "ERROR",
-});
-
-// =============================================================================
-// BLOQUE 10 - SISTEMA INFORMATICO (VERI*FACTU)
-// producerTaxId es null por seguridad. Se rellena desde DatosFiscales.
-// =============================================================================
-
-export const COMPUTER_SYSTEM = Object.freeze({
-    computerSystemName: "Marian Madrid Velo",
-    computerSystemId: "MM-VELO-001",
-    version: "v5010",
-    installationNumber: "1",
-    possibleUseOnlyVerifactu: "S",
-    possibleUseMultiOT: "N",
-    multipleOTIndicator: "N",
-    producerTaxId: null, // Null seguro
-    producerLegalName: null,
-});
-
-// =============================================================================
-// BLOQUE 11 - INTEGRIDAD Y LIMITES FISCALES (SSOT)
-// =============================================================================
-
-export const INTEGRITY = Object.freeze({
-    SCHEMA_VERSION: "v5010.1",
-    ALGORITHM_VERSION: "SHA256-v1",
-    LEDGER_SCHEMA_VERSION: "ASIENTO_V4_FISCAL",
-    GENESIS_HASH: "GENESIS_HASH_MM_2024",
-    ENTRY_SCHEMA_VERSION: "ENTRY_V1",
-    INTEGRITY_ALGORITHM_VERSION: "HMAC_SHA256_V1",
-});
-
-export const FISCAL_LIMITS = Object.freeze({
-    CASHPAYMENT_MAX_EUR: 1000, // Ley 11/2021
-    MONEY_EPSILON: 0.02,
-    ACCOUNTING_EPSILON: 0.005,
-    MAX_AMOUNT_PER_INVOICE: 100000,
-    MAX_AMOUNT_PER_DAY: 500000,
-    MAX_INVOICES_PER_DAY: 1000,
-    MAX_ITEMS_PER_INVOICE: 100,
-    MAX_QUANTITY_PER_ITEM: 99999,
-    MIN_DATE: "2020-01-01",
-    MAX_DATE: "2030-12-31",
-});
-
-// Conjunto de validación centralizado (CFG-13)
 export const VALIDATION_SETS = Object.freeze({
     MOVEMENT_TYPES: new Set(Object.values(MOVEMENT_TYPE)),
     PAYMENT_METHODS: new Set(Object.values(PAYMENT_METHOD)),
     THIRD_PARTY_TYPES: new Set(Object.values(THIRD_PARTY_TYPE)),
-    EVENT_TYPES_REQUIRING_CATALOG: new Set(["VENTA_LINEA", "COMPRA_LINEA", "RECTIFICATIVA", "MOV_STOCK"]),
+    BOOKING_STATUSES: new Set(Object.values(BOOKING_STATUS)),
+    PAYMENT_STATUSES: new Set(Object.values(PAYMENT_STATUS)),
+    BOOKING_TYPES: new Set(Object.values(BOOKING_TYPE)),
+    CONTROL_TYPES: new Set(Object.values(CONTROL_TYPE)),
+    CONTROL_STATUSES: new Set(Object.values(CONTROL_STATUS)),
+    CLOCK_EVENT_TYPES: new Set(Object.values(CLOCK_EVENT_TYPE)),
+    INVENTORY_MOVEMENT_TYPES: new Set(Object.values(INVENTORY_MOVEMENT_TYPE)),
+    ITEM_NATURES: new Set(Object.values(ITEM_NATURE)),
+    CATALOG_STATES_SET: new Set(Object.values(CATALOG_STATES)),
+    ROL_BOOKINGS_SET: new Set(Object.values(ROL_BOOKINGS)),
+    ROL_WEBSITE_SET: new Set(Object.values(ROL_WEBSITE)),
+    CODIGOS_IMPUESTO: new Set(Object.values(CODIGO_IMPUESTO)),
+    TIPOS_IMPOSITIVOS: new Set(TIPO_IMPOSITIVO_VALIDOS),
+    EVENT_TYPES_REQUIRING_CATALOG: new Set([
+        EVENT_TYPE.VENTA_LINEA,
+        EVENT_TYPE.COMPRA_LINEA,
+        EVENT_TYPE.RECTIFICATIVA,
+        EVENT_TYPE.MOV_STOCK,
+    ]),
 });
 
-// Tipos de movimiento con signo negativo en contabilidad
 export const NEGATIVE_SIGN_MOVEMENT_TYPES = Object.freeze([
     MOVEMENT_TYPE.REEMBOLSO,
     MOVEMENT_TYPE.DEVOLUCION_SERVICIO,
@@ -884,43 +829,104 @@ export const NEGATIVE_SIGN_MOVEMENT_TYPES = Object.freeze([
 ]);
 
 // =============================================================================
-// BLOQUE 12 - HELPERS CRITICOS Y VALIDADORES
+// BLOQUE 17 - HELPERS CRITICOS
 // =============================================================================
 
-/**
- * Construye el objeto COMPUTER_SYSTEM fusionando el fallback con la config real.
- * Lanza error si falta el NIF del emisor en tiempo de ejecución.
- */
+const GUID_PATTERN =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export function isValidGuid(guid) {
+    if (typeof guid !== "string") return false;
+    return GUID_PATTERN.test(guid.trim());
+}
+
+export function enumEq(value, expectedEnumValue) {
+    if (!value || !expectedEnumValue) return false;
+    return String(value).trim().toUpperCase() ===
+        String(expectedEnumValue).trim().toUpperCase();
+}
+
+export function enumIn(value, enumObject) {
+    if (!value || !enumObject) return false;
+    const stringValue = String(value).trim().toUpperCase();
+    return Object.values(enumObject).some(
+        (v) => String(v).trim().toUpperCase() === stringValue
+    );
+}
+
+// READ-ONLY migration normalizer (EOL 31/12/2026).
+// ADR-17: SNAKE_CASE canonico. Legacy DUALF1/DUALF2/DUAL/DUAL_F1 aceptados en lectura.
+export function normalizeBookingType(type) {
+    if (!type) return BOOKING_TYPE.SIMPLE;
+    const normalized = String(type).trim().toUpperCase();
+    if (normalized === "SIMPLE" || normalized === "NORMAL") {
+        return BOOKING_TYPE.SIMPLE;
+    }
+    if (
+        normalized === "DUAL_F1" ||
+        normalized === "DUALF1" ||
+        normalized === "DUAL_F_1"
+    ) {
+        return BOOKING_TYPE.DUAL_F1;
+    }
+    if (
+        normalized === "DUAL_F2" ||
+        normalized === "DUALF2" ||
+        normalized === "DUAL_F_2"
+    ) {
+        return BOOKING_TYPE.DUAL_F2;
+    }
+    if (normalized === "DUAL") return BOOKING_TYPE.DUAL_F1;
+    return BOOKING_TYPE.SIMPLE;
+}
+
+export function isDualBookingType(type) {
+    const t = normalizeBookingType(type);
+    return t === BOOKING_TYPE.DUAL_F1 || t === BOOKING_TYPE.DUAL_F2;
+}
+
+export function buildInvoiceNumber(year, month, sequenceNumber) {
+    const y = String(year).slice(-2);
+    const m = String(month).padStart(2, "0");
+    const seq = String(sequenceNumber).padStart(4, "0");
+    return `${y}${m}-${seq}`;
+}
+
 export function buildComputerSystem(fiscalConfig) {
     const fallback = { ...COMPUTER_SYSTEM };
-    
-    if (!fiscalConfig || typeof fiscalConfig !== 'object') {
-        // En entorno de prueba o fallo de carga, usamos fallback pero alertamos
-        console.warn("DatosFiscales no disponible, usando fallback COMPUTER_SYSTEM");
+
+    if (!fiscalConfig || typeof fiscalConfig !== "object") {
         return Object.freeze(fallback);
     }
-    
-    // Validación estricta: Si hay config, debe tener NIF
-    if (!fiscalConfig.producerTaxId) {
-        throw new Error("FISCAL_VIOLATION: producerTaxId es obligatorio en DatosFiscales para operar en modo Veri*factu");
+
+    if (!fiscalConfig.nifProductor && !fiscalConfig.producerTaxId) {
+        throw new Error(
+            "FISCAL_VIOLATION: nifProductor es obligatorio en DatosFiscales CONFIG_SISTEMA para operar en modo Veri*Factu"
+        );
     }
 
     return Object.freeze({
-        computerSystemName: fiscalConfig.computerSystemName || fallback.computerSystemName,
-        computerSystemId: fiscalConfig.computerSystemId || fallback.computerSystemId,
+        computerSystemName:
+            fiscalConfig.sistemaInformatico?.computerSystemName ||
+            fallback.computerSystemName,
+        computerSystemId:
+            fiscalConfig.idSistemaInformatico || fallback.computerSystemId,
         version: fiscalConfig.version || fallback.version,
-        installationNumber: fiscalConfig.installationNumber || fallback.installationNumber,
-        possibleUseOnlyVerifactu: fiscalConfig.possibleUseOnlyVerifactu || fallback.possibleUseOnlyVerifactu,
-        possibleUseMultiOT: fiscalConfig.possibleUseMultiOT || fallback.possibleUseMultiOT,
-        multipleOTIndicator: fiscalConfig.multipleOTIndicator || fallback.multipleOTIndicator,
-        producerTaxId: fiscalConfig.producerTaxId, // Obligatorio
-        producerLegalName: fiscalConfig.producerLegalName || fallback.producerLegalName,
+        installationNumber:
+            fiscalConfig.numeroInstalacion || fallback.installationNumber,
+        possibleUseOnlyVerifactu:
+            fiscalConfig.tipoUsoPosibleSoloVerifactu ||
+            fallback.possibleUseOnlyVerifactu,
+        possibleUseMultiOT:
+            fiscalConfig.tipoUsoPosibleMultiOT || fallback.possibleUseMultiOT,
+        multipleOTIndicator:
+            fiscalConfig.indicadorMultiplesOT || fallback.multipleOTIndicator,
+        producerTaxId: fiscalConfig.nifProductor || fiscalConfig.producerTaxId,
+        producerLegalName:
+            fiscalConfig.nombreRazonProductor || fallback.producerLegalName,
     });
 }
 
-/**
- * Resuelve la cuenta contable de retención IRPF según el rol fiscal.
- */
 export function resolveWithholdingAccount(fiscalRole) {
     switch (fiscalRole) {
         case FISCAL_ROLE.EMISOR:
@@ -932,30 +938,32 @@ export function resolveWithholdingAccount(fiscalRole) {
     }
 }
 
-/**
- * Valida la integridad del SSOT al arranque.
- */
+// =============================================================================
+// BLOQUE 18 - VALIDACION DE INTEGRIDAD SSOT
+// =============================================================================
+
 export function validateInternalConfig() {
     const issues = [];
 
-    // Verificar colecciones criticas (FASE3: SLOT_LOCKS absorbida en ControlOperativo)
     if (!BUSINESS_COLLECTIONS.CITAS_F2 || !OPERATIONAL_COLLECTIONS.CONTROL_OPERATIVO) {
         issues.push("Colecciones criticas faltantes");
     }
-
-    // Verificar enums críticos
     if (Object.keys(BOOKING_FIELDS).length < 10) {
         issues.push("BOOKING_FIELDS incompleto");
     }
-
-    // Verificar contrato Wix B3
     if (SDK_CONFIG.LOCATION_TYPES.TIME_SLOTS !== "BUSINESS") {
-        issues.push(`VIOLACION_B3: TIME_SLOTS es ${SDK_CONFIG.LOCATION_TYPES.TIME_SLOTS}, debe ser BUSINESS`);
+        issues.push(
+            `VIOLACION_B3: TIME_SLOTS es ${SDK_CONFIG.LOCATION_TYPES.TIME_SLOTS}, debe ser BUSINESS`
+        );
     }
-
-    // Verificar límites fiscales
     if (FISCAL_LIMITS.CASHPAYMENT_MAX_EUR !== 1000) {
-        issues.push("Límite efectivo incorrecto (debe ser 1000)");
+        issues.push("Limite efectivo incorrecto (Ley 11/2021: 1000 EUR)");
+    }
+    if (!ROL_BOOKINGS || !ROL_WEBSITE) {
+        issues.push("ANEXO v8.1 C-02: ROL_BOOKINGS/ROL_WEBSITE faltantes");
+    }
+    if (BOOKING_TYPE.DUAL_F1 !== "DUAL_F1" || BOOKING_TYPE.DUAL_F2 !== "DUAL_F2") {
+        issues.push("ADR-17: BOOKING_TYPE debe usar SNAKE_CASE (DUAL_F1/DUAL_F2)");
     }
 
     return {
@@ -965,91 +973,27 @@ export function validateInternalConfig() {
     };
 }
 
-/**
- * Valida el contexto de ejecución (usuario, location, timestamp).
- */
 export function validateRuntimeContext(context) {
     const errors = [];
-    
+
     if (!context) {
-        errors.push("Contexto de ejecucion nulo");
-        return { valid: false, errors };
+        return { valid: false, errors: ["Contexto de ejecucion nulo"], timestamp: Date.now() };
     }
-    
     if (!context.user || !context.user.role) {
         errors.push("Rol de usuario no definido");
     }
-    
     if (!context.locationId) {
         errors.push("Location ID no definido");
     } else if (context.locationId !== SDK_CONFIG.LOCATION_ID) {
         errors.push(`Location ID invalido: ${context.locationId}`);
     }
-    
     if (!context.timestamp || isNaN(new Date(context.timestamp).getTime())) {
         errors.push("Timestamp invalido");
     }
-    
+
     return {
         valid: errors.length === 0,
         errors,
         timestamp: Date.now(),
     };
-}
-
-/**
- * Comparador seguro de enums (ignora mayúsculas/minúsculas y espacios).
- */
-export function enumEq(value, expectedEnumValue) {
-    if (!value || !expectedEnumValue) return false;
-    return String(value).trim().toUpperCase() === String(expectedEnumValue).trim().toUpperCase();
-}
-
-/**
- * Verifica si un valor pertenece a un enum (ignora mayúsculas/minúsculas y espacios).
- */
-export function enumIn(value, enumObject) {
-    if (!value || !enumObject) return false;
-    const stringValue = String(value).trim().toUpperCase();
-    return Object.values(enumObject).some(v => String(v).trim().toUpperCase() === stringValue);
-}
-
-// READ-ONLY migration normalizer (EOL 31/12/2026): maps legacy persisted
-// values to the canonical BIBLIA 11.2 enum. New writes must use BOOKING_TYPE
-// directly; this function never invents data, it only resolves known aliases.
-export function normalizeBookingType(type) {
-    if (!type) return BOOKING_TYPE.SIMPLE;
-    const normalized = String(type).toUpperCase().replace(/[^A-Z0-9]/g, "");
-    if (normalized === "SIMPLE" || normalized === "NORMAL") return BOOKING_TYPE.SIMPLE;
-    if (normalized === "DUALF1" || normalized === "DUAL_F1" || normalized === "DUAL") return BOOKING_TYPE.DUALF1;
-    if (normalized === "DUALF2" || normalized === "DUAL_F2") return BOOKING_TYPE.DUALF2;
-    // Unknown legacy value: keep SIMPLE as safe default and let callers log.
-    return BOOKING_TYPE.SIMPLE;
-}
-
-/**
- * True when a (possibly legacy) booking type resolves to a dual phase.
- */
-export function isDualBookingType(type) {
-    const t = normalizeBookingType(type);
-    return t === BOOKING_TYPE.DUALF1 || t === BOOKING_TYPE.DUALF2;
-}
-
-/**
- * Validates GUID/UUID format.
- */
-export function isValidGuid(guid) {
-    if (typeof guid !== 'string') return false;
-    return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(guid);
-}
-
-/**
- * Genera número de factura secuencial YYYYMM-SEQ.
- */
-export function buildInvoiceNumber(date, sequenceNumber) {
-    const d = new Date(date);
-    const year = d.getFullYear().toString().slice(-2);
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const seq = String(sequenceNumber).padStart(4, '0');
-    return `${year}${month}-${seq}`;
 }

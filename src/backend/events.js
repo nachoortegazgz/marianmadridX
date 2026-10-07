@@ -27,6 +27,9 @@ FIXES APLICADOS v5009-FISCAL (heredados):
 import wixData from "backend/dataClient";
 import { createClient } from "@wix/sdk";
 
+import { secrets } from "@wix/secrets";
+
+
 import {
     makeTraceId,
     _executeWithRetry,
@@ -48,7 +51,7 @@ import {
     PAYMENT_STATUS,
     BOOKING_FIELDS,
     SDK_CONFIG,
-    AEAT_INVOICE_TYPE,
+    TIPO_FACTURA,
     CORRECTION_REASON,
     FISCAL_ROLE,
     EVENT_TYPE,
@@ -141,7 +144,7 @@ let _emisorCache = null;
 async function _getEmisorFiscal() {
     if (_emisorCache) return _emisorCache;
     try {
-        const nif = await getSecret(SECRETS.FISCAL_NIF_EMISOR).catch(() => "");
+        const nif = await secrets.getSecretValue(SECRETS.FISCAL_NIF_EMISOR).catch(() => "");
         _emisorCache = {
             issuerTaxId: _safeTrim(nif).toUpperCase(),
             issuerLegalName: EMISOR_FALLBACK_NAME,
@@ -541,7 +544,7 @@ export async function wixBookingsV2_onBookingCanceled(rawBody) {
                         invoiceIssueDate: new Date().toLocaleDateString("sv-SE", {
                             timeZone: SDK_CONFIG?.TZ || "Europe/Madrid",
                         }),
-                        invoiceType: AEAT_INVOICE_TYPE.R1,
+                        invoiceType: TIPO_FACTURA.R1,
                         correctionType: "I",
                         previousInvoiceId: originalMovement.numSerieFactura || null,
                         previousInvoiceNumber: originalMovement.numSerieFactura || null,
@@ -729,7 +732,7 @@ export async function wixEcom_onOrderPaymentStatusUpdated(rawBody) {
                 invoiceIssueDate: new Date().toLocaleDateString("sv-SE", {
                     timeZone: SDK_CONFIG?.TZ || "Europe/Madrid",
                 }),
-                invoiceType: fiscalData.isB2B ? AEAT_INVOICE_TYPE.F1 : AEAT_INVOICE_TYPE.F2,
+                invoiceType: fiscalData.isB2B ? TIPO_FACTURA.F1 : TIPO_FACTURA.F2,
                 issuerTaxId: emisor.issuerTaxId,
                 issuerLegalName: emisor.issuerLegalName,
                 recipientTaxId: fiscalData.recipientTaxId,
@@ -991,7 +994,7 @@ export async function wixEcom_onOrderRefunded(rawBody) {
                 operationDescription: `Refund - Order ${orderId}`,
                 numSerieFactura: originalMovement.numSerieFactura,
                 invoiceIssueDate: todayDate,
-                invoiceType: AEAT_INVOICE_TYPE.R1,
+                invoiceType: TIPO_FACTURA.R1,
                 correctionType: "I",
                 previousInvoiceId: originalMovement.numSerieFactura || null,
                 previousInvoiceNumber: originalMovement.numSerieFactura || null,

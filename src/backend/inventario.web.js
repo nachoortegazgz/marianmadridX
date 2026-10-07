@@ -63,6 +63,8 @@ import { logAuditEvent } from "backend/audit";
 
 import { hashSHA256, hmacSha256Hex } from "backend/securityEngine";
 import { SECRETS, getSecret } from "backend/mmSecrets";
+import { secrets } from "@wix/secrets";
+import { SECRETS } from "backend/mmSecrets";
 
 const log = logger;
 const INVENTARIO_COL = BUSINESS_COLLECTIONS.INVENTARIO_STOCK_VENTA;
@@ -416,7 +418,7 @@ export const generateInventoryClosing = webMethod(Permissions.Admin, async (opti
     }
 
     // FIX-53: fallo explicito si no hay fiscal key activa.
-    const fiscalKey = await getSecret(SECRETS.FISCAL_KEY).catch(() => "");
+    const fiscalKey = await secrets.getSecretValue(SECRETS.FISCAL_KEY).catch(() => "");
     if (!fiscalKey) {
       return {
         status: "ERROR",

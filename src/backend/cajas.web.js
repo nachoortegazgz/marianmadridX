@@ -26,6 +26,7 @@ FIXES APLICADOS v5009-FISCAL (heredados):
 
 import { webMethod, Permissions } from "wix-web-module";
 import wixData from "backend/dataClient";
+import { secrets } from "@wix/secrets";
 
 import {
     BUSINESS_COLLECTIONS,
@@ -37,7 +38,7 @@ import {
     PAYMENT_METHOD,
     IVA_RATES,
     CASH_REGISTER_STATUS,
-    AEAT_INVOICE_TYPE,
+    TIPO_FACTURA,
     VAT_ACCRUAL_STATUS,
     FISCAL_ROLE,
 } from "backend/internalConfig";
@@ -132,7 +133,7 @@ async function _getCachedSecret(name) {
     if (entry && (now - entry.at) < SECRET_CACHE_TTL_MS) {
         return entry.value;
     }
-    const value = await getSecret(name).catch(() => "");
+    const value = await secrets.getSecretValue(name).catch(() => "");
     _secretCache.set(name, { value, at: now });
     return value;
 }
@@ -239,7 +240,7 @@ function _buildAEATPayload(movement, generatedAt) {
         ["IDEmisorFactura", movement.issuerTaxId || ""],
         ["NumSerieFactura", movement.numSerieFactura || ""],
         ["FechaExpedicionFactura", _formatAEATDate(movement.invoiceIssueDate)],
-        ["TipoFactura", movement.invoiceType || AEAT_INVOICE_TYPE.F1],
+        ["TipoFactura", movement.invoiceType || TIPO_FACTURA.F1],
         ["CuotaTotal", String(Number(movement.taxAmount || 0).toFixed(2))],
         ["ImporteTotal", String(Number(movement.totalAmount || 0).toFixed(2))],
         ["Huella", movement.previousRecordHash || ""],
@@ -659,7 +660,7 @@ export const registerManualTransaction = webMethod(Permissions.SiteMember, async
 
                 bankReconciliationReference,
 
-                invoiceType: invoiceType || AEAT_INVOICE_TYPE.F1,
+                invoiceType: invoiceType || TIPO_FACTURA.F1,
                 correctionReason,
                 previousInvoiceId,
                 issuerInvoiceNumber,
@@ -1271,7 +1272,7 @@ export const registerGiftCardSale = webMethod(Permissions.SiteMember, async (pay
                 linkedAdvanceId: null,
                 vatAccrualStatus: VAT_ACCRUAL_STATUS.ANTICIPADO,
                 bankReconciliationReference: _safeTrim(payload?.bankReconciliationReference) || null,
-                invoiceType: AEAT_INVOICE_TYPE.F2,
+                invoiceType: TIPO_FACTURA.F2,
                 correctionReason: null,
                 previousInvoiceId: null,
                 issuerInvoiceNumber: null,
@@ -1437,7 +1438,7 @@ export const registerGiftCardRedemption = webMethod(Permissions.SiteMember, asyn
                 linkedAdvanceId: null,
                 vatAccrualStatus: VAT_ACCRUAL_STATUS.APLICACION_ANTICIPO,
                 bankReconciliationReference: null,
-                invoiceType: AEAT_INVOICE_TYPE.F2,
+                invoiceType: TIPO_FACTURA.F2,
                 correctionReason: null,
                 previousInvoiceId: null,
                 issuerInvoiceNumber: null,

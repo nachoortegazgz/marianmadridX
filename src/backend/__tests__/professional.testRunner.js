@@ -45,13 +45,13 @@ const mockCrypto = {
 };
 
 // FASE4-CONSOLIDADO: alineado al SSOT canonico v7 (alias umbrella y ESTADO_* erradicados)
-import { BUSINESS_COLLECTIONS, OPERATIONAL_COLLECTIONS, CONTROL_TYPE, BOOKING_STATUS, PAYMENT_STATUS, AEAT_INVOICE_TYPE, MOVEMENT_TYPE } from '../internalConfig.js';
+import { BUSINESS_COLLECTIONS, OPERATIONAL_COLLECTIONS, CONTROL_TYPE, BOOKING_STATUS, PAYMENT_STATUS, TIPO_FACTURA, MOVEMENT_TYPE } from '../internalConfig.js';
 
 // Alias internos del test hacia enums canonicos (no debilita assertions)
 const ESTADO_CITA = BOOKING_STATUS;
 const ESTADO_PAGO = PAYMENT_STATUS;
 const TIPO_MOVIMIENTO = MOVEMENT_TYPE;
-const INVOICE_TYPE = AEAT_INVOICE_TYPE;
+const INVOICE_TYPE = TIPO_FACTURA;
 
 // Funciones utilitarias (inline para tests)
 import { createHash } from 'crypto';

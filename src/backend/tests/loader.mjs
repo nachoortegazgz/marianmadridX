@@ -107,6 +107,12 @@ export const wixDataMock = {
     const rows = wixDataMock._store.get(collection) || [];
     return rows.find((r) => r._id === id) || null;
   },
+  queryReferencedItems: async (collection, itemId, field) => {
+    wixDataMock._calls.push({ op: 'queryReferencedItems', collection });
+    const source = (wixDataMock._store.get(collection) || []).find((row) => row._id === itemId);
+    const ids = Array.isArray(source?.[field]) ? source[field] : [];
+    return { items: ids.map((value) => typeof value === 'object' ? value : { _id: value }) };
+  },
   insert: async (collection, item) => {
     wixDataMock._calls.push({ op: 'insert', collection });
     const rows = wixDataMock._store.get(collection) || [];
@@ -165,6 +171,8 @@ export const paymentsBackend = fnProxy;
 export const transactions = fnProxy;
 export const media = fnProxy;
 export const crypto = fnProxy;
+export const members = { getCurrentMember: async () => null };
+export const secrets = { getSecretValue: async () => "mock-secret" };
 // Named SDK exports imported by backend code (offline stubs):
 export const availabilityTimeSlots = fnProxy;
 export const bookings = fnProxy;
@@ -192,6 +200,7 @@ export default mod.default;
 
 const WIX_DATA_SOURCE = `
 import { wixDataMock } from ${JSON.stringify(p2u(path.join(BACKEND_DIR, 'tests/loader.mjs')).href.replace(/\\/g, '/'))};
+export const items = wixDataMock;
 export default wixDataMock;
 `;
 
@@ -334,6 +343,9 @@ export async function load(url, context, nextLoad) {
     return { format: 'module', source: WIXDATASDK_SOURCE, shortCircuit: true };
   }
   if (url.startsWith('mock:wix-data')) {
+
+  if (url.startsWith('mock:wix-data') || url === 'mock:@wix/data') {
+
     return { format: 'module', source: WIX_DATA_SOURCE, shortCircuit: true };
   }
   if (url.startsWith('mock:')) {

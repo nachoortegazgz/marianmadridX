@@ -39,7 +39,7 @@ import {
     PAYMENT_METHOD,
     IVA_RATES,
     CONCURRENCY,
-    AEAT_INVOICE_TYPE,
+    TIPO_FACTURA,
     CORRECTION_REASON,
     VAT_ACCRUAL_STATUS,
     FISCAL_ROLE,
@@ -153,7 +153,7 @@ function _buildAEATPayload(movement, generatedAt) {
     const recipientLegalName = _safeTrim(movement.recipientLegalName);
     const numSerieFactura = _safeTrim(movement.numSerieFactura);
     const invoiceIssueDate = _safeTrim(movement.invoiceIssueDate);
-    const invoiceType = _safeTrim(movement.invoiceType) || AEAT_INVOICE_TYPE.F1;
+    const invoiceType = _safeTrim(movement.invoiceType) || TIPO_FACTURA.F1;
     const taxAmount = Number(movement.taxAmount ?? 0);
     const totalAmount = Number(movement.totalAmount ?? 0);
     const previousRecordHash = _safeTrim(movement.previousRecordHash);
@@ -435,7 +435,7 @@ export async function registrarEventoEconomico(input) {
 
         operationDescription: _cleanText(input.operationDescription || "", 500),
 
-        invoiceType: _safeTrim(input.invoiceType) || AEAT_INVOICE_TYPE.F1,
+        invoiceType: _safeTrim(input.invoiceType) || TIPO_FACTURA.F1,
         correctionType: _safeTrim(input.correctionType) || null,
         correctionReason: _safeTrim(input.correctionReason) || null,
         previousInvoiceId: _safeTrim(input.previousInvoiceId) || null,
@@ -789,7 +789,7 @@ export const registrarFacturaRecibida = webMethod(
                 numSerieFactura,
                 invoiceIssueDate: _safeTrim(payload?.invoiceIssueDate),
                 operationDate: _safeTrim(payload?.operationDate) || null,
-                invoiceType: _safeTrim(payload?.invoiceType) || AEAT_INVOICE_TYPE.F1,
+                invoiceType: _safeTrim(payload?.invoiceType) || TIPO_FACTURA.F1,
                 issuerTaxId,
                 issuerLegalName: _safeTrim(payload?.issuerLegalName),
                 recipientTaxId: _safeTrim(payload?.recipientTaxId),

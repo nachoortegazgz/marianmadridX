@@ -8,7 +8,7 @@ STANDARDS: G10 ASCII Strict.
 
 FIXES APLICADOS v5009-FISCAL-V20.1:
   - V20-01: imports alineados (MOVEMENT_TYPE, ACCOUNTING_ACCOUNT,
-            AEAT_INVOICE_TYPE, FISCAL_ROLE).
+            TIPO_FACTURA, FISCAL_ROLE).
   - V20-03: escritura de LibroAsientosContablesDetalle con nombres V20.1
             (sourceEventId, thirdPartyId, recordHash, fiscalRole,
             withholdingBase, irpfWithholdingAmount, surchargeAmount,
@@ -27,12 +27,15 @@ FIXES APLICADOS v5007.8 (heredados):
 */
 
 import wixData from "backend/dataClient";
+
+import { secrets } from "@wix/secrets";
+
 import {
     BUSINESS_COLLECTIONS,
     SDK_CONFIG,
     MOVEMENT_TYPE,
     ACCOUNTING_ACCOUNT,
-    AEAT_INVOICE_TYPE,
+    TIPO_FACTURA,
     FISCAL_ROLE,
 } from "backend/internalConfig";
 import { SECRETS, getSecret } from "backend/mmSecrets";
@@ -109,7 +112,7 @@ function _readIssuerInvoiceNumber(movement) {
 }
 
 function _readInvoiceType(movement) {
-    return _cleanText(movement?.invoiceType || movement?.claveRegistroFactura || AEAT_INVOICE_TYPE.F1, 4);
+    return _cleanText(movement?.invoiceType || movement?.claveRegistroFactura || TIPO_FACTURA.F1, 4);
 }
 
 function _readWithholdingBase(movement) {
@@ -523,7 +526,7 @@ export async function projectLedgerMovementToAccounting(movimiento) {
 
         const projected = await _buildLines(base, movimiento, map);
 
-        const fiscalKey = await getSecret(SECRETS.FISCAL_KEY);
+        const fiscalKey = await secrets.getSecretValue(SECRETS.FISCAL_KEY);
         if (!fiscalKey) throw new Error("ACCOUNTING_PROJECTION_SIGNING_KEY_MISSING");
 
         const headerPayload = [
