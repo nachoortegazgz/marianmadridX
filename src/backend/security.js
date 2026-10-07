@@ -1,27 +1,20 @@
 /*
 =============================================================================
 MODULE: backend/security.js
-VERSION: v8.1-SSOT-MASTER
+VERSION: v8.1-SSOT-MASTER-SDKv2
 BASE: BIBLIA v8.0-SSOT-MASTER + ANEXO SSOT v8.1
 RESPONSIBILITY: Motor de seguridad. Rate limiter con ventana deslizante,
                 verificacion de roles (rolWebsite) y bloqueo persistente
                 cross-instancia via ControlOperativo.
 STANDARDS: G10 ASCII Strict.
 
-CORRECTIONS APPLIED (ANEXO v8.1):
-  - BUG-01 FIX: eliminado .eq("active", true) (C-01: campo no existe)
-  - BUG-01 FIX: staff?.rol → staff?.rolWebsite (C-02)
-  - C-02: COLLABORATOR_ROLES → ROL_WEBSITE
-  - C-03: staffMemberId → memberId en resolucion de identidad
-  - SSOT-11: rolWebsite es capa de autorizacion interna sobre permisos Velo
+FIXES APLICADOS SDK v2:
+  - Migración de members.getCurrentMember() a currentMember.getMember()
 =============================================================================
 */
 
 import wixData from "backend/dataClient";
 import { currentMember } from "@wix/members";
-
-import { members } from "@wix/members";
- 
 
 import {
     BUSINESS_COLLECTIONS,
@@ -131,7 +124,7 @@ function _createAccessDeniedError(requiredRole) {
 }
 
 // =============================================================================
-// BLOQUE 3 - RESOLUCION DE STAFF (BUG-01 FIX: sin .eq("active"), usa memberId)
+// BLOQUE 3 - RESOLUCION DE STAFF
 // =============================================================================
 
 async function _queryStaffByEmail(email, traceId) {
@@ -139,8 +132,6 @@ async function _queryStaffByEmail(email, traceId) {
     if (!normalizedEmail) return null;
 
     try {
-        // C-01: eliminado .eq("active", true). El ciclo de vida se gestiona
-        // por ausencia de registro o por rolWebsite.
         const result = await wixData
             .query(BUSINESS_COLLECTIONS.MAPA_STAFF)
             .eq(MAPA_STAFF_FIELDS.EMAIL, normalizedEmail)
@@ -162,7 +153,6 @@ async function _queryStaffByMemberId(memberId, traceId) {
     if (!normalizedMemberId || !_isValidGuid(normalizedMemberId)) return null;
 
     try {
-        // C-03: resolucion por memberId (antes staffMemberId)
         const result = await wixData
             .query(BUSINESS_COLLECTIONS.MAPA_STAFF)
             .eq(MAPA_STAFF_FIELDS.MEMBER_ID, normalizedMemberId)
@@ -283,7 +273,7 @@ export function rateLimiter(
 }
 
 // =============================================================================
-// BLOQUE 5 - BLOQUEO PERSISTENTE (ControlOperativo RATE_LIMIT)
+// BLOQUE 5 - BLOQUEO PERSISTENTE
 // =============================================================================
 
 export async function isKeyPersistentlyBlocked(surface, key) {
@@ -382,7 +372,8 @@ export async function registerPersistentBlock(surface, key, durationMs, traceId 
 
 async function _getCurrentMemberInfo(traceId = null) {
     try {
-        const member = await members.getCurrentMember();
+        // SDK v2: currentMember.getMember()
+        const member = await currentMember.getMember();
         if (!member) return null;
 
         const memberId = _safeString(member._id);
@@ -401,14 +392,13 @@ async function _getCurrentMemberInfo(traceId = null) {
 }
 
 // =============================================================================
-// BLOQUE 7 - VERIFICACION DE ROLES (BUG-01 FIX: usa rolWebsite)
+// BLOQUE 7 - VERIFICACION DE ROLES
 // =============================================================================
 
 async function _resolveStaffForCurrentMember(traceId) {
     const memberInfo = await _getCurrentMemberInfo(traceId);
     if (!memberInfo) return null;
 
-    // C-03: prioridad a memberId (mas robusto que email)
     if (memberInfo.memberId) {
         const byMemberId = await _queryStaffByMemberId(memberInfo.memberId, traceId);
         if (byMemberId) return byMemberId;
@@ -424,7 +414,6 @@ async function _resolveStaffForCurrentMember(traceId) {
 
 export async function isAdmin(traceId = null) {
     const staff = await _resolveStaffForCurrentMember(traceId);
-    // C-02: rolWebsite (no staff?.rol que nunca existio)
     return staff?.rolWebsite === ROL_WEBSITE.ADMIN;
 }
 
@@ -452,9 +441,9 @@ export async function getMyStaffContext(traceId = null) {
 
     return {
         resourceId: staff.resourceId,
-        memberId: staff.memberId, // C-03
-        rolBookings: staff.rolBookings, // C-02
-        rolWebsite: staff.rolWebsite, // C-02
+        memberId: staff.memberId,
+        rolBookings: staff.rolBookings,
+        rolWebsite: staff.rolWebsite,
         displayName: staff.displayName || staff.staffName,
         email: staff.email,
         scheduleId: staff.scheduleId,
