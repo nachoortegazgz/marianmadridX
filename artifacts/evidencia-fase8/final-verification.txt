@@ -1,0 +1,28 @@
+FASE 8 - VERIFICACION FINAL POST ETAPA C (2026-10-07)
+=====================================================
+Baseline:            57/57 pass  (baseline-tests.log)
+Post-migracion:      57/57 pass  (final-post-C3-tests.log)
+
+GREPS NEGATIVOS
+from "wix-data" salvo dataClient ............ 0
+consistentRead en call-sites ................ 0 (2 menciones documentales: mmSecrets.js:57, dataClient.js:26)
+wix-secrets-backend en import ............... 0
+wix-members-backend en import ............... 0
+wix-ecom-backend en import .................. 0
+wix-data en src/pages + src/public .......... 0
+ALIAS COLLECTIONS fuera de categorias SSOT .. 0
+
+GREPS POSITIVOS
+from "backend/dataClient" ................... 18
+consistencyMode: "strong" ................... 18 grep plano = 17 call-sites reales + 1 cabecera DAL
+consistencyMode: "eventual" ................. 2
+
+REGRESION IDs (main vs HEAD, ficheros tocados por Etapa C)
+total coincidencias legacy main=65 actual=65 -> 0 nuevas introducidas
+Residuo global 90 = preexistente en main (public/, pages/, tests/, validation.js),
+fuera del alcance Etapa C. Campo CUSTOM "invoiceNumber"/"taxRate" en colecciones
+fiscales es alias interno NO-AEAT: el payload AEAT usa numSerieFactura/
+tipoImpositivo (verificado eventLog.js:174,359). No tocar sin ADR propio.
+
+node --check todos los .js de src/backend ... verde
+G10 ASCII estricto en ficheros tocados ...... verde

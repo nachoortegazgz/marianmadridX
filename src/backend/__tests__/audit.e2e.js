@@ -179,14 +179,14 @@ function auditFlow1_ReservaSimpleOnline() {
     // Paso 3: Verificar MOVIMIENTOS_CAJA esperado
     const movimientoExpected = {
         sequenceNumber: 1,
-        invoiceNumber: "FAC-2026-00001",
+        numSerieFactura: "FAC-2026-00001",
         operationDate: "2026-09-20",
         movementType: TIPO_MOVIMIENTO.VENTA_ONLINE,
         paymentMethod: FORMA_PAGO.ONLINE,
         totalAmount: 50.00,
         taxableAmount: 41.32,
         taxAmount: 8.68,
-        taxRate: IVA_RATES.GENERAL,
+        tipoImpositivo: IVA_RATES.GENERAL,
         accountingAmount: 50.00,
         businessTaxId: "B12345678",
         previousRecordHash: "0".repeat(64),
@@ -198,7 +198,7 @@ function auditFlow1_ReservaSimpleOnline() {
 
     const step3FieldsValid = checkRequiredFields(
         movimientoExpected,
-        ["sequenceNumber", "invoiceNumber", "operationDate", "movementType", "paymentMethod", "totalAmount", "taxableAmount", "taxAmount", "businessTaxId", "previousRecordHash"],
+        ["sequenceNumber", "numSerieFactura", "operationDate", "movementType", "paymentMethod", "totalAmount", "taxableAmount", "taxAmount", "businessTaxId", "previousRecordHash"],
         "Paso 3: Estructura MOVIMIENTOS_CAJA"
     );
 
@@ -246,7 +246,7 @@ function auditFlow1_ReservaSimpleOnline() {
     // Paso 5: Verificar LIBRO_REGISTRO_FACTURAS_EXPEDIDAS
     const libroExpedidasExpected = {
         _id: `EXP_FAC-2026-00001`,
-        invoiceNumber: "FAC-2026-00001",
+        numSerieFactura: "FAC-2026-00001",
         invoiceIssueDate: "2026-09-20",
         claveRegistro: CLAVES_AEAT.F1,
         totalAmount: 50.00,
@@ -258,7 +258,7 @@ function auditFlow1_ReservaSimpleOnline() {
 
     const step5Valid = checkRequiredFields(
         libroExpedidasExpected,
-        ["invoiceNumber", "invoiceIssueDate", "claveRegistro", "totalAmount", "taxAmount", "previousRecordHash"],
+        ["numSerieFactura", "invoiceIssueDate", "claveRegistro", "totalAmount", "taxAmount", "previousRecordHash"],
         "Paso 5: Estructura LIBRO_REGISTRO_FACTURAS_EXPEDIDAS"
     );
     flowResult.steps.push({ step: 5, name: "Verificar Libro Registro Facturas Expedidas", valid: step5Valid });
@@ -379,14 +379,14 @@ function auditFlow2_ReservaDualConGap() {
     // Paso 4: Verificar MOVIMIENTOS_CAJA conjunto
     const movimientoDualExpected = {
         sequenceNumber: 2,
-        invoiceNumber: "FAC-2026-00002",
+        numSerieFactura: "FAC-2026-00002",
         operationDate: "2026-09-20",
         movementType: TIPO_MOVIMIENTO.VENTA_ONLINE,
         paymentMethod: FORMA_PAGO.ONLINE,
         totalAmount: 100.00, // F1 + F2 conjuntos
         taxableAmount: 82.64,
         taxAmount: 17.36,
-        taxRate: IVA_RATES.GENERAL,
+        tipoImpositivo: IVA_RATES.GENERAL,
         lineaItems: [
             { serviceId: serviceF1.serviceId, amount: 50.00 },
             { serviceId: serviceF2.serviceId, amount: 50.00 },
@@ -397,7 +397,7 @@ function auditFlow2_ReservaDualConGap() {
 
     const step4FieldsValid = checkRequiredFields(
         movimientoDualExpected,
-        ["sequenceNumber", "invoiceNumber", "totalAmount", "taxableAmount", "taxAmount", "lineaItems", "reservaIdVinculada"],
+        ["sequenceNumber", "numSerieFactura", "totalAmount", "taxableAmount", "taxAmount", "lineaItems", "reservaIdVinculada"],
         "Paso 4: MOVIMIENTOS_CAJA dual"
     );
 
@@ -832,7 +832,7 @@ function auditFlow7_VentaOnline() {
         lineaItems: storesWebhook.lineItems,
         taxableAmount: 123.97,
         taxAmount: 26.03,
-        taxRate: IVA_RATES.GENERAL,
+        tipoImpositivo: IVA_RATES.GENERAL,
     };
 
     const step2Valid = checkRequiredFields(
@@ -1050,7 +1050,7 @@ function verifyDataIntegrityInCollections() {
 
     // Lista de colecciones críticas a verificar
     const criticalCollections = [
-        { name: BUSINESS_COLLECTIONS.MOVIMIENTOS_CAJA, requiredFields: ["sequenceNumber", "invoiceNumber", "totalAmount", "taxableAmount", "taxAmount", "businessTaxId", "previousRecordHash", "currentRecordHash"] },
+        { name: BUSINESS_COLLECTIONS.MOVIMIENTOS_CAJA, requiredFields: ["sequenceNumber", "numSerieFactura", "totalAmount", "taxableAmount", "taxAmount", "businessTaxId", "previousRecordHash", "currentRecordHash"] },
         { name: BUSINESS_COLLECTIONS.CITAS_F2, requiredFields: ["bookingId", "serviceId", "resourceId", "startDate", "endDate", "bookingStatus", "paymentStatus"] },
         // SSOT-09: AsientosContables es FORBIDDEN -> se audita el detalle permitido (mismo journalEntryId + entryStatus)
         { name: BUSINESS_COLLECTIONS.LIBRO_ASIENTOS_CONTABLES_DETALLE, requiredFields: ["journalEntryId", "lineNumber", "accountCode", "debitAmount", "creditAmount", "entryStatus"] },

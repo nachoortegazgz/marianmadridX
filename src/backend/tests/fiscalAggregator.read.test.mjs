@@ -45,7 +45,7 @@ test('READ-03 tax amount prefers canonical cuotaTotal', () => {
 });
 
 test('READ-04 tax rate prefers canonical tipoImpositivo', () => {
-  assert.strictEqual(T.readTaxRate({ tipoImpositivo: 0.21, taxRate: 0.1, tasaIva: 0.04 }), 0.21);
+  assert.strictEqual(T.readTaxRate({ tipoImpositivo: 0.21, tasaIva: 0.04 }), 0.21);
 });
 
 test('READ-05 tax rate legacy emits warn', () => {

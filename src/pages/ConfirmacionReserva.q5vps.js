@@ -13,7 +13,7 @@ RESPONSIBILITY:
 CONTRACTS:
   - createBooking canonical: bookedEntity.slot.{serviceId, scheduleId,
     startDate(Z), endDate(Z), timezone, resource.id}; totalParticipants:1.
-  - Nomenclatura V20.1: issuerTaxId, invoiceNumber, invoiceIssueDate,
+  - Nomenclatura V20.1: issuerTaxId, numSerieFactura, invoiceIssueDate,
     totalAmount, recordHash, digitalSignature, recordTimestamp.
   - Dual F1+F2: pairToken compartido; si existe F2 se muestra como linea
     asociada (mismo staff, gap <= 120 min validado en bookingSaga).
@@ -110,7 +110,7 @@ export async function loadConfirmation() {
 export function renderVerifactuReceipt(movimiento) {
     const qrUrl = buildVerifactuQrUrl({
         issuerTaxId: movimiento.issuerTaxId,
-        invoiceNumber: movimiento.invoiceNumber,
+        numSerieFactura: movimiento.numSerieFactura,
         invoiceIssueDate: movimiento.invoiceIssueDate,
         totalAmount: movimiento.totalAmount,
         recordHash: movimiento.recordHash,

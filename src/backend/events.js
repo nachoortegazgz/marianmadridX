@@ -533,18 +533,18 @@ export async function wixBookingsV2_onBookingCanceled(rawBody) {
                         taxAmount: -Math.abs(Number(
                             originalMovement.taxAmount ?? 0
                         )),
-                        taxRate: Number(
-                            originalMovement.taxRate ?? 21
+                        tipoImpositivo: Number(
+                            originalMovement.tipoImpositivo ?? 21
                         ),
                         operationDescription: `Rectificacion cancelacion booking ${bookingId}`,
-                        invoiceNumber: originalMovement.invoiceNumber,
+                        numSerieFactura: originalMovement.numSerieFactura,
                         invoiceIssueDate: new Date().toLocaleDateString("sv-SE", {
                             timeZone: SDK_CONFIG?.TZ || "Europe/Madrid",
                         }),
                         invoiceType: AEAT_INVOICE_TYPE.R1,
                         correctionType: "I",
-                        previousInvoiceId: originalMovement.invoiceNumber || null,
-                        previousInvoiceNumber: originalMovement.invoiceNumber || null,
+                        previousInvoiceId: originalMovement.numSerieFactura || null,
+                        previousInvoiceNumber: originalMovement.numSerieFactura || null,
                         previousInvoiceIssueDate: originalMovement.invoiceIssueDate || null,
                         correctionReason: CORRECTION_REASON.NUMERO_SERIE,
                         issuerTaxId: emisor.issuerTaxId,
@@ -694,7 +694,7 @@ export async function wixEcom_onOrderPaymentStatusUpdated(rawBody) {
         // SSOT v20.1 / auditoria 5.3: fiscalidad online coherente. El importe
         // del ledger es IVA INCLUIDO, por lo que base y cuota se derivan del
         // total con el tipo general (IVA_RATES.GENERAL). Queda erradicado el
-        // patron legacy "taxAmount: 0, taxRate: 21" y la cabecera y el
+        // patron legacy "taxAmount: 0, tipoImpositivo: 21" y la cabecera y el
         // desglose deben usar exactamente los mismos valores.
         const onlineTaxRate = IVA_RATES.GENERAL;
         const onlineTaxableBase =
@@ -720,12 +720,12 @@ export async function wixEcom_onOrderPaymentStatusUpdated(rawBody) {
                     ? fiscalData.withholdingBase
                     : onlineTaxableBase,
                 taxAmount: onlineTaxAmount,
-                taxRate: onlineTaxRate,
+                tipoImpositivo: onlineTaxRate,
                 irpfWithholdingAmount: fiscalData.irpfWithholdingAmount,
                 irpfWithholdingRate: fiscalData.irpfWithholdingRate,
                 withholdingBase: fiscalData.withholdingBase,
                 operationDescription: orderConcept,
-                invoiceNumber: null,
+                numSerieFactura: null,
                 invoiceIssueDate: new Date().toLocaleDateString("sv-SE", {
                     timeZone: SDK_CONFIG?.TZ || "Europe/Madrid",
                 }),
@@ -746,7 +746,7 @@ export async function wixEcom_onOrderPaymentStatusUpdated(rawBody) {
                     taxableBaseOrNonSubjectAmount: fiscalData.withholdingBase > 0
                         ? fiscalData.withholdingBase
                         : onlineTaxableBase,
-                    taxRate: onlineTaxRate,
+                    tipoImpositivo: onlineTaxRate,
                     chargedTaxAmount: onlineTaxAmount,
                     operationDescription: orderConcept,
                     units: 1,
@@ -985,16 +985,16 @@ export async function wixEcom_onOrderRefunded(rawBody) {
                 taxAmount: -Math.abs(Number(
                     originalMovement.taxAmount ?? 0
                 )),
-                taxRate: Number(
-                    originalMovement.taxRate ?? 21
+                tipoImpositivo: Number(
+                    originalMovement.tipoImpositivo ?? 21
                 ),
                 operationDescription: `Refund - Order ${orderId}`,
-                invoiceNumber: originalMovement.invoiceNumber,
+                numSerieFactura: originalMovement.numSerieFactura,
                 invoiceIssueDate: todayDate,
                 invoiceType: AEAT_INVOICE_TYPE.R1,
                 correctionType: "I",
-                previousInvoiceId: originalMovement.invoiceNumber || null,
-                previousInvoiceNumber: originalMovement.invoiceNumber || null,
+                previousInvoiceId: originalMovement.numSerieFactura || null,
+                previousInvoiceNumber: originalMovement.numSerieFactura || null,
                 previousInvoiceIssueDate: originalMovement.invoiceIssueDate || null,
                 correctionReason: CORRECTION_REASON.OTRAS,
                 issuerTaxId: emisor.issuerTaxId,
@@ -1010,7 +1010,7 @@ export async function wixEcom_onOrderRefunded(rawBody) {
                     base: -Math.abs(Number(
                         originalMovement.taxableBaseOrNonSubjectAmount ?? 0
                     )),
-                    tipo: Number(originalMovement.taxRate ?? 21),
+                    tipo: Number(originalMovement.tipoImpositivo ?? 21),
                     cuota: -Math.abs(Number(
                         originalMovement.taxAmount ?? 0
                     )),

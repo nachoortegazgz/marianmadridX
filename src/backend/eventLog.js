@@ -151,7 +151,7 @@ function _buildGenerationTimestamp(date) {
 function _buildAEATPayload(movement, generatedAt) {
     const recipientTaxId = _safeTrim(movement.recipientTaxId);
     const recipientLegalName = _safeTrim(movement.recipientLegalName);
-    const invoiceNumber = _safeTrim(movement.invoiceNumber);
+    const numSerieFactura = _safeTrim(movement.numSerieFactura);
     const invoiceIssueDate = _safeTrim(movement.invoiceIssueDate);
     const invoiceType = _safeTrim(movement.invoiceType) || AEAT_INVOICE_TYPE.F1;
     const taxAmount = Number(movement.taxAmount ?? 0);
@@ -171,7 +171,7 @@ function _buildAEATPayload(movement, generatedAt) {
 
     const fields = [
         ["IDEmisorFactura", issuerTaxId || ""],
-        ["NumSerieFactura", invoiceNumber || ""],
+        ["NumSerieFactura", numSerieFactura || ""],
         ["FechaExpedicionFactura", _formatAEATDate(invoiceIssueDate)],
         ["TipoFactura", invoiceType],
         ["CuotaTotal", String(taxAmount.toFixed(2))],
@@ -272,7 +272,7 @@ export async function _getNextSequenceInternal(traceId) {
         return {
             sequenceNumber: nextGlobal,
             yearSequence: nextYear,
-            invoiceNumber: `FAC-${yearKey}-${String(nextYear).padStart(5, "0")}`,
+            numSerieFactura: `FAC-${yearKey}-${String(nextYear).padStart(5, "0")}`,
         };
     } finally {
         await _unlockSlotKey(SEQUENCE_MUTEX_KEY, lockOwnerId).catch(() => {});
@@ -347,7 +347,7 @@ function _buildFiscalPayloadSnapshot({
         emitidaPorTerceroODestinatario: _safeTrim(input.issuedByThirdPartyOrRecipient) || "E",
         nombreRazonTercero: _safeTrim(input.thirdPartyLegalName) || null,
         nifTerceroExpedidor: _safeTrim(input.issuerThirdPartyTaxId) || null,
-        numSerieFactura: _safeTrim(input.invoiceNumber),
+        numSerieFactura: _safeTrim(input.numSerieFactura),
         fechaExpedicionFactura: _safeTrim(input.invoiceIssueDate),
         fechaOperacion: _safeTrim(input.operationDate) || null,
         tipoFactura: _safeTrim(input.invoiceType) || "F1",
@@ -355,8 +355,8 @@ function _buildFiscalPayloadSnapshot({
         descripcionOperacion: _safeTrim(input.operationDescription),
         importeTotal: Number(input.totalAmount ?? 0),
         baseImponibleOImporteNoSujeto: Number(input.taxableBaseOrNonSubjectAmount ?? 0),
-        cuotaTotal: Number(input.taxAmount ?? 0),
-        tipoImpositivo: Number(input.taxRate ?? catalog?.taxRate ?? 0),
+        cuotaTotal: Number(input.cuotaTotal ?? input.taxAmount ?? 0),
+        tipoImpositivo: Number(input.tipoImpositivo ?? catalog?.tipoImpositivo ?? 0),
         tipoRecargoEquivalencia: Number(input.surchargeRate ?? 0),
         cuotaRecargoEquivalencia: Number(input.surchargeAmount ?? 0),
         importeRetencionIRPF: Number(input.irpfWithholdingAmount ?? 0),
@@ -410,7 +410,7 @@ export async function registrarEventoEconomico(input) {
     // 4. Construir movimiento base (aun sin huella)
     const baseMovement = {
         sequenceNumber: seq.sequenceNumber,
-        invoiceNumber: _safeTrim(input.invoiceNumber) || seq.invoiceNumber,
+        numSerieFactura: _safeTrim(input.numSerieFactura) || seq.numSerieFactura,
         invoiceIssueDate: _safeTrim(input.invoiceIssueDate || input.operationDate) ||
             new Date().toLocaleDateString("sv-SE", { timeZone: SDK_CONFIG?.TZ || "Europe/Madrid" }),
         operationDate: _safeTrim(input.operationDate) || null,
@@ -425,7 +425,7 @@ export async function registrarEventoEconomico(input) {
         totalAmount: Number(input.totalAmount ?? 0),
         taxableBaseOrNonSubjectAmount: Number(input.taxableBaseOrNonSubjectAmount ?? 0),
         taxAmount: Number(input.taxAmount ?? 0),
-        taxRate: Number(input.taxRate ?? IVA_RATES.GENERAL),
+        tipoImpositivo: Number(input.tipoImpositivo ?? IVA_RATES.GENERAL),
         surchargeRate: Number(input.surchargeRate ?? 0),
         surchargeAmount: Number(input.surchargeAmount ?? 0),
         irpfWithholdingAmount: Number(input.irpfWithholdingAmount ?? 0),
@@ -522,7 +522,7 @@ export async function registrarEventoEconomico(input) {
         const det = await wixData.insert(BUSINESS_COLLECTIONS.LIBRO_ASIENTOS_CONTABLES_DETALLE, {
             lineHash,
             taxableBaseOrNonSubjectAmount: Number(d.taxableBaseOrNonSubjectAmount ?? d.base ?? 0),
-            taxRate: Number(d.taxRate ?? d.tipo ?? 0),
+            tipoImpositivo: Number(d.tipoImpositivo ?? d.tipo ?? 0),
             chargedTaxAmount: Number(d.chargedTaxAmount ?? d.cuota ?? 0),
             sourceEventId: cabecera._id,
             lineNumber: i + 1,
@@ -568,7 +568,7 @@ export async function registrarEventoEconomico(input) {
             detailIds,
             recordHash,
             sequenceNumber: seq.sequenceNumber,
-            invoiceNumber: doc.invoiceNumber,
+            numSerieFactura: doc.numSerieFactura,
             projectionStatus,
         },
         error: null,
@@ -741,11 +741,11 @@ export const registrarFacturaRecibida = webMethod(
                     error: { code: "ISSUER_TAX_ID_REQUIRED", message: "issuerTaxId obligatorio" },
                 };
             }
-            const invoiceNumber = _safeTrim(payload?.invoiceNumber);
-            if (!invoiceNumber) {
+            const numSerieFactura = _safeTrim(payload?.numSerieFactura);
+            if (!numSerieFactura) {
                 return {
                     status: "ERROR", data: null,
-                    error: { code: "INVOICE_NUMBER_REQUIRED", message: "invoiceNumber obligatorio" },
+                    error: { code: "INVOICE_NUMBER_REQUIRED", message: "numSerieFactura obligatorio" },
                 };
             }
             const totalAmount = Number(payload?.totalAmount) || 0;
@@ -756,11 +756,11 @@ export const registrarFacturaRecibida = webMethod(
                 };
             }
 
-            // Idempotencia por invoiceNumber + issuerTaxId sobre el ledger
+            // Idempotencia por numSerieFactura + issuerTaxId sobre el ledger
             const existing = await wixData
                 .query(BUSINESS_COLLECTIONS.MOVIMIENTOS_CAJA)
                 .eq("movementType", MOVEMENT_TYPE.PAGO_PROVEEDOR)
-                .eq("invoiceNumber", invoiceNumber)
+                .eq("numSerieFactura", numSerieFactura)
                 .eq("thirdPartyTaxId", issuerTaxId)
                 .limit(1)
                 .find({ suppressAuth: true });
@@ -780,13 +780,13 @@ export const registrarFacturaRecibida = webMethod(
                 totalAmount,
                 taxableBaseOrNonSubjectAmount: Number(payload?.totalTaxableBase) || 0,
                 taxAmount: Number(payload?.totalVatAmount) || 0,
-                taxRate: Number(payload?.taxRate) || IVA_RATES.GENERAL,
+                tipoImpositivo: Number(payload?.tipoImpositivo) || IVA_RATES.GENERAL,
                 surchargeRate: Number(payload?.surchargeRate) || 0,
                 surchargeAmount: Number(payload?.surchargeAmount) || 0,
                 irpfWithholdingAmount: Number(payload?.irpfWithholdingAmount) || 0,
                 irpfWithholdingRate: Number(payload?.irpfWithholdingRate) || 0,
                 operationDescription: _cleanText(payload?.operationDescription || "", 500),
-                invoiceNumber,
+                numSerieFactura,
                 invoiceIssueDate: _safeTrim(payload?.invoiceIssueDate),
                 operationDate: _safeTrim(payload?.operationDate) || null,
                 invoiceType: _safeTrim(payload?.invoiceType) || AEAT_INVOICE_TYPE.F1,

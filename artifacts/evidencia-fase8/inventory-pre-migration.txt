@@ -1,0 +1,39 @@
+src/backend/horario.web.js:27:import wixData from "wix-data";
+src/backend/booking/bookingSaga.js:53:import wixData from "wix-data";
+src/backend/booking/bookingCore.js:67:import wixData from "wix-data";
+src/backend/citasManager.web.js:25:import wixData from "wix-data";
+src/backend/security.js:19:import wixData from "wix-data";
+src/backend/eventLog.js:31:import wixData from "wix-data";
+src/backend/cajas.web.js:28:import wixData from "wix-data";
+src/backend/crons.js:24:import wixData from "wix-data";
+src/backend/reservas.web.js:24:import wixData from "wix-data";
+src/backend/data.js:25:import wixData from "wix-data";
+src/backend/contabilidad.js:29:import wixData from "wix-data";
+src/backend/security.web.js:29:import wixData from "wix-data";
+src/backend/staff.js:18:import wixData from "wix-data";
+src/backend/inventario.web.js:41:import wixData from "wix-data";
+src/backend/fiscalAggregator.web.js:23:import wixData from "wix-data";
+src/backend/audit.js:18:import wixData from "wix-data";
+src/backend/events.js:27:import wixData from "wix-data";
+src/backend/fiscalDocuments.web.js:11:import wixData from "wix-data";
+== 18 files ==
+src/backend/booking/bookingCore.js:511:        .get(LOCKS_COL, _safeLockId(k), { suppressAuth: true, consistentRead: true })
+src/backend/booking/bookingCore.js:636:    return await wixData.get(TRANSACTIONS_COL, id, { suppressAuth: true, consistentRead: true }).catch(() => null);
+src/backend/booking/bookingCore.js:1143:                .find({ suppressAuth: true, consistentRead: true });
+src/backend/eventLog.js:224:            .get(BUSINESS_COLLECTIONS.CAJA_ACTUAL, CASH_SEQ_ID, { suppressAuth: true, consistentRead: true })
+src/backend/eventLog.js:229:                .get(BUSINESS_COLLECTIONS.CAJA_ACTUAL, CASH_REGISTER_ID, { suppressAuth: true, consistentRead: true })
+src/backend/eventLog.js:252:                            .get(BUSINESS_COLLECTIONS.CAJA_ACTUAL, CASH_SEQ_ID, { suppressAuth: true, consistentRead: true })
+src/backend/eventLog.js:287:        .find({ suppressAuth: true, consistentRead: true });
+src/backend/cajas.web.js:384:        .find({ suppressAuth: true, consistentRead: true });
+src/backend/cajas.web.js:582:                .find({ suppressAuth: true, consistentRead: true });
+src/backend/cajas.web.js:1220:            .find({ suppressAuth: true, consistentRead: true });
+src/backend/cajas.web.js:1368:            .find({ suppressAuth: true, consistentRead: true });
+src/backend/contabilidad.js:324:        .find({ suppressAuth: true, consistentRead: true })
+src/backend/contabilidad.js:331:        .get(BUSINESS_COLLECTIONS.LIBRO_ASIENTOS_CONTABLES_DETALLE, line._id, { suppressAuth: true, consistentRead: true })
+src/backend/fiscalAggregator.web.js:258:    query.find({ suppressAuth: true, consistentRead: false }),
+src/backend/fiscalAggregator.web.js:269:      res.next({ suppressAuth: true, consistentRead: false }),
+src/backend/events.js:514:                .find({ suppressAuth: true, consistentRead: true })
+src/backend/events.js:646:                .find({ suppressAuth: true, consistentRead: true }),
+src/backend/events.js:887:                .find({ suppressAuth: true, consistentRead: true }),
+src/backend/events.js:1062:                .find({ suppressAuth: true, consistentRead: true }),
+== 19 sites ==

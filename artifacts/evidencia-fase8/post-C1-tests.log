@@ -1,0 +1,352 @@
+TAP version 13
+# (node:3000) ExperimentalWarning: `--experimental-loader` may be removed in the future; instead use `register()`:
+# --import 'data:text/javascript,import { register } from "node:module"; import { pathToFileURL } from "node:url"; register("./src/backend/tests/loader.mjs", pathToFileURL("./"));'
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# (node:3000) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///workspace/src/backend/data.js is not specified and it doesn't parse as CommonJS.
+# Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+# To eliminate this warning, add "type": "module" to /workspace/package.json.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: ControlOperativo hooks (ADR-05)
+    # Subtest: beforeInsert exige controlType valido del enum
+    ok 1 - beforeInsert exige controlType valido del enum
+      ---
+      duration_ms: 1.495036
+      ...
+    # Subtest: beforeInsert exige dedupeKey no vacio
+    ok 2 - beforeInsert exige dedupeKey no vacio
+      ---
+      duration_ms: 0.332811
+      ...
+    # Subtest: beforeInsert rechaza status fuera de CONTROL_STATUS
+    ok 3 - beforeInsert rechaza status fuera de CONTROL_STATUS
+      ---
+      duration_ms: 0.209139
+      ...
+    # Subtest: WEBHOOK_EVENT es append-only: update prohibido
+    ok 4 - WEBHOOK_EVENT es append-only: update prohibido
+      ---
+      duration_ms: 0.213312
+      ...
+    # Subtest: WEBHOOK_EVENT es append-only: remove prohibido
+    ok 5 - WEBHOOK_EVENT es append-only: remove prohibido
+      ---
+      duration_ms: 0.232687
+      ...
+    # Subtest: Subtipos purgables (SLOT_LOCK/DUAL_CACHE) permiten update/remove
+    ok 6 - Subtipos purgables (SLOT_LOCK/DUAL_CACHE) permiten update/remove
+      ---
+      duration_ms: 0.206708
+      ...
+    # Subtest: CONTROL_TYPE cubre los 8 subtipos del esquema objetivo
+    ok 7 - CONTROL_TYPE cubre los 8 subtipos del esquema objetivo
+      ---
+      duration_ms: 0.779409
+      ...
+    1..7
+ok 1 - ControlOperativo hooks (ADR-05)
+  ---
+  duration_ms: 4.838473
+  type: 'suite'
+  ...
+# (node:3012) ExperimentalWarning: `--experimental-loader` may be removed in the future; instead use `register()`:
+# --import 'data:text/javascript,import { register } from "node:module"; import { pathToFileURL } from "node:url"; register("./src/backend/tests/loader.mjs", pathToFileURL("./"));'
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# (node:3012) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///workspace/src/backend/crons.js is not specified and it doesn't parse as CommonJS.
+# Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+# To eliminate this warning, add "type": "module" to /workspace/package.json.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# {"traceId":"log-muxiywp1-486d616d-8b1b-42c3-90bd-5bbf71934bd8","message":"Current member lookup failed","timestamp":"2026-10-07T03:05:25.765Z","level":"ERROR"}
+# {"targetYmd":"2026-10-06","closingSignatureStatus":"SIGNED","traceId":"log-muxiywp2-7aadc75b-a9d6-41b5-82fa-343365cda212","timestamp":"2026-10-07T03:05:25.766Z","level":"INFO","message":"verifyNightlyZClosing verified closed by prior process"}
+# {"traceId":"log-muxiywp3-50c8d4e5-4f42-4d4d-8a78-949f81104e7d","message":"Current member lookup failed","timestamp":"2026-10-07T03:05:25.767Z","level":"ERROR"}
+# {"targetYmd":"2026-10-06","code":"ACCESS_DENIED","traceId":"log-muxiywp3-0ef013e2-e928-4a89-b0d3-797c1c1a5759","timestamp":"2026-10-07T03:05:25.767Z","level":"WARN","message":"verifyNightlyZClosing requires manual action"}
+# {"removed":3,"kept":1,"retentionDays":90,"traceId":"log-muxiywp6-7d2de510-c457-4b41-bd6a-3c0db5300878","timestamp":"2026-10-07T03:05:25.770Z","level":"INFO","message":"cleanAuditLogs completed"}
+# Subtest: CRON-PARITY-01 every jobs.config functionName is exported by crons.js
+ok 2 - CRON-PARITY-01 every jobs.config functionName is exported by crons.js
+  ---
+  duration_ms: 1.731096
+  ...
+# Subtest: CRON-PARITY-02 crons.js exports cover the two previously-missing jobs
+ok 3 - CRON-PARITY-02 crons.js exports cover the two previously-missing jobs
+  ---
+  duration_ms: 0.228083
+  ...
+# Subtest: CRON-Z-01 verifyNightlyZClosing is idempotent when the day is already closed (ACCESS_DENIED path)
+ok 4 - CRON-Z-01 verifyNightlyZClosing is idempotent when the day is already closed (ACCESS_DENIED path)
+  ---
+  duration_ms: 26.326008
+  ...
+# Subtest: CRON-Z-02 verifyNightlyZClosing raises MANUAL_REQUIRED alert when close is missing and denied
+ok 5 - CRON-Z-02 verifyNightlyZClosing raises MANUAL_REQUIRED alert when close is missing and denied
+  ---
+  duration_ms: 1.198575
+  ...
+# Subtest: CRON-AUDIT-01 cleanAuditLogs purges only terminal rows past retention
+ok 6 - CRON-AUDIT-01 cleanAuditLogs purges only terminal rows past retention
+  ---
+  duration_ms: 2.815959
+  ...
+# (node:3024) ExperimentalWarning: `--experimental-loader` may be removed in the future; instead use `register()`:
+# --import 'data:text/javascript,import { register } from "node:module"; import { pathToFileURL } from "node:url"; register("./src/backend/tests/loader.mjs", pathToFileURL("./"));'
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# (node:3024) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///workspace/src/backend/data.js is not specified and it doesn't parse as CommonJS.
+# Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+# To eliminate this warning, add "type": "module" to /workspace/package.json.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# {"raw":"CONFIRMADO","canonical":"CONFIRMED","timestamp":"2026-10-07T03:05:25.931Z","level":"WARN","traceId":"log-muxiywtl-79deacc4-f47c-423b-82b4-81947317317d","message":"legacy bookingStatus normalized on read"}
+# {"raw":"PAGADO","canonical":"PAID","timestamp":"2026-10-07T03:05:25.933Z","level":"WARN","traceId":"log-muxiywtp-6bab0068-e354-405c-9082-7f24edb68d79","message":"legacy paymentStatus normalized on read"}
+# Subtest: HOOK-CITAS-01 valid simple cita passes insert/update
+ok 7 - HOOK-CITAS-01 valid simple cita passes insert/update
+  ---
+  duration_ms: 1.305385
+  ...
+# Subtest: HOOK-CITAS-02 invalid bookingStatus rejected
+ok 8 - HOOK-CITAS-02 invalid bookingStatus rejected
+  ---
+  duration_ms: 3.204125
+  ...
+# Subtest: HOOK-CITAS-03 missing traceId rejected (SSOT-12)
+ok 9 - HOOK-CITAS-03 missing traceId rejected (SSOT-12)
+  ---
+  duration_ms: 0.24428
+  ...
+# Subtest: HOOK-CITAS-04 DUALF1/DUALF2 without pairToken rejected
+ok 10 - HOOK-CITAS-04 DUALF1/DUALF2 without pairToken rejected
+  ---
+  duration_ms: 0.35663
+  ...
+# Subtest: HOOK-CITAS-05 legacy Spanish payment status normalized on read
+ok 11 - HOOK-CITAS-05 legacy Spanish payment status normalized on read
+  ---
+  duration_ms: 0.385672
+  ...
+# Subtest: HOOK-APPEND-01 MovimientosInventario update/remove blocked
+ok 12 - HOOK-APPEND-01 MovimientosInventario update/remove blocked
+  ---
+  duration_ms: 0.233942
+  ...
+# Subtest: HOOK-APPEND-02 retired blocked-collection hooks are gone (ADR-02)
+ok 13 - HOOK-APPEND-02 retired blocked-collection hooks are gone (ADR-02)
+  ---
+  duration_ms: 0.191208
+  ...
+# Subtest: HOOK-CAJA-01 rejects write without traceId
+ok 14 - HOOK-CAJA-01 rejects write without traceId
+  ---
+  duration_ms: 1.701415
+  ...
+# Subtest: HOOK-CAJA-02 rejects wrong schemaVersion
+ok 15 - HOOK-CAJA-02 rejects wrong schemaVersion
+  ---
+  duration_ms: 0.263977
+  ...
+# Subtest: HOOK-CAJA-04 accepts valid CIERRE_Z baseline
+ok 16 - HOOK-CAJA-04 accepts valid CIERRE_Z baseline
+  ---
+  duration_ms: 0.262688
+  ...
+# Subtest: HOOK-CAJA-03 update/remove remain forbidden
+ok 17 - HOOK-CAJA-03 update/remove remain forbidden
+  ---
+  duration_ms: 0.213068
+  ...
+# Subtest: HOOK-STOCK-01 stockAvailable must equal onHand - reserved
+ok 18 - HOOK-STOCK-01 stockAvailable must equal onHand - reserved
+  ---
+  duration_ms: 0.258478
+  ...
+# Subtest: HOOK-CLOCK-01 invalid clockEventType rejected
+ok 19 - HOOK-CLOCK-01 invalid clockEventType rejected
+  ---
+  duration_ms: 0.260786
+  ...
+# Subtest: HOOK-CLOCK-02 AJUSTE requires adjustmentReason
+ok 20 - HOOK-CLOCK-02 AJUSTE requires adjustmentReason
+  ---
+  duration_ms: 0.26228
+  ...
+# Subtest: HOOK-CLOCK-03 missing traceId rejected
+ok 21 - HOOK-CLOCK-03 missing traceId rejected
+  ---
+  duration_ms: 0.213734
+  ...
+# Subtest: HOOK-MOCK-00 loader mock available
+ok 22 - HOOK-MOCK-00 loader mock available
+  ---
+  duration_ms: 0.230155
+  ...
+# (node:3037) ExperimentalWarning: `--experimental-loader` may be removed in the future; instead use `register()`:
+# --import 'data:text/javascript,import { register } from "node:module"; import { pathToFileURL } from "node:url"; register("./src/backend/tests/loader.mjs", pathToFileURL("./"));'
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# (node:3037) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///workspace/src/backend/reservas.web.js is not specified and it doesn't parse as CommonJS.
+# Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+# To eliminate this warning, add "type": "module" to /workspace/package.json.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: DTO-01 getConfirmedBookingForDisplay returns whitelisted DTO only
+ok 23 - DTO-01 getConfirmedBookingForDisplay returns whitelisted DTO only
+  ---
+  duration_ms: 5.810738
+  ...
+# Subtest: DTO-02 legacy status row readable via canonical projection
+ok 24 - DTO-02 legacy status row readable via canonical projection
+  ---
+  duration_ms: 0.618486
+  ...
+# Subtest: DTO-03 non-displayable booking states are hidden
+ok 25 - DTO-03 non-displayable booking states are hidden
+  ---
+  duration_ms: 0.413512
+  ...
+# Subtest: DTO-04 getMovimientoByBooking exposes only receipt-safe fields
+ok 26 - DTO-04 getMovimientoByBooking exposes only receipt-safe fields
+  ---
+  duration_ms: 1.372105
+  ...
+# Subtest: DTO-05 missing bookingId rejected without CMS call
+ok 27 - DTO-05 missing bookingId rejected without CMS call
+  ---
+  duration_ms: 0.26839
+  ...
+# (node:3049) ExperimentalWarning: `--experimental-loader` may be removed in the future; instead use `register()`:
+# --import 'data:text/javascript,import { register } from "node:module"; import { pathToFileURL } from "node:url"; register("./src/backend/tests/loader.mjs", pathToFileURL("./"));'
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# (node:3049) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///workspace/src/backend/fiscalAggregator.web.js is not specified and it doesn't parse as CommonJS.
+# Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+# To eliminate this warning, add "type": "module" to /workspace/package.json.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# {"traceId":"log-muxiyx4p-3dc31450-4880-4565-8a62-0cd221f31b5f","error":"FISCAL_CONFIG_MISSING","timestamp":"2026-10-07T03:05:26.332Z","level":"ERROR","message":"_getBusinessTaxId failed"}
+# Subtest: READ-01 taxable amount prefers canonical baseImponibleOImporteNoSujeto
+ok 28 - READ-01 taxable amount prefers canonical baseImponibleOImporteNoSujeto
+  ---
+  duration_ms: 1.005514
+  ...
+# Subtest: READ-02 taxable amount falls back to legacy with warn
+ok 29 - READ-02 taxable amount falls back to legacy with warn
+  ---
+  duration_ms: 0.283078
+  ...
+# Subtest: READ-03 tax amount prefers canonical cuotaTotal
+ok 30 - READ-03 tax amount prefers canonical cuotaTotal
+  ---
+  duration_ms: 0.235835
+  ...
+# Subtest: READ-04 tax rate prefers canonical tipoImpositivo
+ok 31 - READ-04 tax rate prefers canonical tipoImpositivo
+  ---
+  duration_ms: 0.270318
+  ...
+# Subtest: READ-05 tax rate legacy emits warn
+ok 32 - READ-05 tax rate legacy emits warn
+  ---
+  duration_ms: 0.197473
+  ...
+# Subtest: READ-06 record hash prefers canonical recordHash
+ok 33 - READ-06 record hash prefers canonical recordHash
+  ---
+  duration_ms: 0.210713
+  ...
+# Subtest: TAXID-01 business tax id reads DatosFiscales CONFIG_SISTEMA nifProductor
+ok 34 - TAXID-01 business tax id reads DatosFiscales CONFIG_SISTEMA nifProductor
+  ---
+  duration_ms: 2.948103
+  ...
+# Subtest: TAXID-02 legacy EMISOR adapter returns taxId with warn when no config row
+ok 35 - TAXID-02 legacy EMISOR adapter returns taxId with warn when no config row
+  ---
+  duration_ms: 0.712056
+  ...
+# Subtest: TAXID-03 throws FISCAL_CONFIG_MISSING when nothing found (SSOT v20.1: placeholder BXXXXXXXX ERRADICADO)
+ok 36 - TAXID-03 throws FISCAL_CONFIG_MISSING when nothing found (SSOT v20.1: placeholder BXXXXXXXX ERRADICADO)
+  ---
+  duration_ms: 5.083099
+  ...
+# Subtest: DEDUPE-01 prepareScheduledManagerPackages removed from aggregator
+ok 37 - DEDUPE-01 prepareScheduledManagerPackages removed from aggregator
+  ---
+  duration_ms: 0.30951
+  ...
+# (node:3061) ExperimentalWarning: `--experimental-loader` may be removed in the future; instead use `register()`:
+# --import 'data:text/javascript,import { register } from "node:module"; import { pathToFileURL } from "node:url"; register("./src/backend/tests/loader.mjs", pathToFileURL("./"));'
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: UNIT-GEN-01 pairToken deterministic
+ok 38 - UNIT-GEN-01 pairToken deterministic
+  ---
+  duration_ms: 1.543947
+  ...
+# Subtest: UNIT-GEN-02 slotKey format
+ok 39 - UNIT-GEN-02 slotKey format
+  ---
+  duration_ms: 0.246328
+  ...
+# Subtest: UNIT-GEN-03 date conversion Madrid TZ stable
+ok 40 - UNIT-GEN-03 date conversion Madrid TZ stable
+  ---
+  duration_ms: 0.43544
+  ...
+# Subtest: UNIT-ENUM-01 booking enums aligned with canonical SSOT
+ok 41 - UNIT-ENUM-01 booking enums aligned with canonical SSOT
+  ---
+  duration_ms: 0.216367
+  ...
+# Subtest: UNIT-ENUM-02 fiscal AEAT enums
+ok 42 - UNIT-ENUM-02 fiscal AEAT enums
+  ---
+  duration_ms: 0.322226
+  ...
+# Subtest: UNIT-ENUM-03 accounting PGC enums
+ok 43 - UNIT-ENUM-03 accounting PGC enums
+  ---
+  duration_ms: 0.165665
+  ...
+# Subtest: UNIT-STRUCT-01 collections SSOT defined
+ok 44 - UNIT-STRUCT-01 collections SSOT defined
+  ---
+  duration_ms: 1.711282
+  ...
+# Subtest: UNIT-STRUCT-02 CONCURRENCY/SDK config valid
+ok 45 - UNIT-STRUCT-02 CONCURRENCY/SDK config valid
+  ---
+  duration_ms: 0.159898
+  ...
+# Subtest: UNIT-STRUCT-03 CitasF2 payload without legacy fields
+ok 46 - UNIT-STRUCT-03 CitasF2 payload without legacy fields
+  ---
+  duration_ms: 0.361066
+  ...
+# Subtest: SSOT-04 EU_VAT_PREFIXES exported and frozen
+ok 47 - SSOT-04 EU_VAT_PREFIXES exported and frozen
+  ---
+  duration_ms: 0.184882
+  ...
+# Subtest: SSOT-05 FISCAL_ROLE exported
+ok 48 - SSOT-05 FISCAL_ROLE exported
+  ---
+  duration_ms: 0.19588
+  ...
+# Subtest: SSOT-06 BUSINESS vs OPERATIONAL separation frozen
+ok 49 - SSOT-06 BUSINESS vs OPERATIONAL separation frozen
+  ---
+  duration_ms: 0.250473
+  ...
+# Subtest: SSOT-07 BOOKING_TYPE present (canonical migration lands in FASE1)
+ok 50 - SSOT-07 BOOKING_TYPE present (canonical migration lands in FASE1)
+  ---
+  duration_ms: 0.22629
+  ...
+# Subtest: SSOT-08 ITEM_NATURE present
+ok 51 - SSOT-08 ITEM_NATURE present
+  ---
+  duration_ms: 0.291309
+  ...
+# (node:3061) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///workspace/src/backend/internalConfig.js is not specified and it doesn't parse as CommonJS.
+# Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+# To eliminate this warning, add "type": "module" to /workspace/package.json.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+1..51
+# tests 57
+# suites 1
+# pass 57
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 1098.008513
