@@ -411,6 +411,17 @@ export const TIPO_FACTURA = Object.freeze({
     R5: "R5",
 });
 
+export const CORRECTION_REASON = Object.freeze({
+    NUMERO_SERIE: "NUMERO_SERIE",
+    OTRAS: "OTRAS",
+});
+
+export const VAT_ACCRUAL_STATUS = Object.freeze({
+    DEVENGADO: "DEVENGADO",
+    ANTICIPADO: "ANTICIPADO",
+    APLICACION_ANTICIPO: "APLICACION_ANTICIPO",
+});
+
 export const TIPO_RECTIFICATIVA = Object.freeze({
     I: "I",
     S: "S",

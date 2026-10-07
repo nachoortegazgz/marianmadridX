@@ -26,8 +26,8 @@ FIXES APLICADOS v5009-FISCAL-V20.1:
 */
 
 import { webMethod, Permissions } from "wix-web-module";
-import wixData from "wix-data";
-import { currentMember } from "wix-members-backend";
+import wixData from "backend/dataClient";
+import { members } from "@wix/members";
 
 import { makeTraceId } from "public/mmUtils";
 
@@ -114,19 +114,17 @@ export const checkCajeroAccess = webMethod(
 // =============================================================================
 // BLOQUE 4 - CHECK STAFF COLLABORATOR ACCESS (CONTRATO ADMINISTRACION)
 // Devuelve { isMarianManager, isAdmin, isCajero }.
-// isMarianManager: miembro autenticado cuyo email esta dado de alta ACTIVO
+// isMarianManager: miembro autenticado cuyo email esta dado de alta
 // en MapaStaff con resourceId = STAFF_ACCESS.MARIAN_RESOURCE_ID y rol ADMIN
 // (identidad Marian). Fail-closed: cualquier duda deniega.
 // =============================================================================
 
 async function _isMarianManagerIdentity(traceId) {
     try {
-        const contact = await currentMember
-            .getContact({ suppressAuth: true })
-            .catch(() => null);
+        const contact = await members.getCurrentMember().catch(() => null);
 
         const email = String(
-            contact?.loginEmail || contact?.email || ""
+            contact?.loginEmail || contact?.contactDetails?.email || contact?.email || ""
         ).trim().toLowerCase();
 
         if (!email) {
@@ -136,7 +134,6 @@ async function _isMarianManagerIdentity(traceId) {
         const res = await wixData
             .query("MapaStaff")
             .eq("email", email)
-            .eq("active", true)
             .eq("resourceId", STAFF_ACCESS.MARIAN_RESOURCE_ID)
             .limit(1)
             .find({ suppressAuth: true });

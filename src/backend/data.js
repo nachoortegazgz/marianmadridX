@@ -19,7 +19,7 @@ CORRECTIONS APPLIED (ANEXO v8.1):
 =============================================================================
 */
 
-import wixData from "wix-data";
+import wixData from "backend/dataClient";
 
 import {
     BUSINESS_COLLECTIONS,

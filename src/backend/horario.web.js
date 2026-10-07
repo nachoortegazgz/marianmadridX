@@ -9,9 +9,9 @@ CORRECTIONS: C-01 (sin active), C-03/C-04 (memberId), BUG-04 FIX (campos
 =============================================================================
 */
 
-import wixData from "wix-data";
+import wixData from "backend/dataClient";
 import { webMethod, Permissions } from "wix-web-module";
-import { currentMember } from "wix-members-backend";
+import { members } from "@wix/members";
 
 import {
     BUSINESS_COLLECTIONS,
@@ -81,7 +81,7 @@ function _safeTrim(v) {
 
 async function _resolveStaffContext(traceId) {
     try {
-        const member = await currentMember.getMember();
+        const member = await members.getCurrentMember();
         if (!member) return null;
 
         const memberId = _safeTrim(member._id);
@@ -102,7 +102,7 @@ async function _resolveStaffContext(traceId) {
             memberId,
             email,
             resourceId: staff.resourceId,
-            staffMemberId: staff.memberId, // C-03: campo canonico memberId
+            memberId: staff.memberId,
             displayName: getStaffDisplayName(staff),
             rolWebsite: staff.rolWebsite, // C-02
             rolBookings: staff.rolBookings, // C-02
@@ -138,7 +138,7 @@ export const getMyStaffContext = webMethod(
                 status: "OK",
                 data: {
                     resourceId: ctx.resourceId,
-                    memberId: ctx.staffMemberId,
+                    memberId: ctx.memberId,
                     displayName: ctx.displayName,
                     rolWebsite: ctx.rolWebsite,
                     rolBookings: ctx.rolBookings,
@@ -182,7 +182,7 @@ export const registrarFichaje = webMethod(
             // BUG-04 FIX: solo campos del schema canonico (cms.v8.1-FINAL)
             const record = {
                 [F.RESOURCE_ID]: ctx.resourceId,
-                [F.MEMBER_ID]: ctx.staffMemberId, // C-04
+                [F.MEMBER_ID]: ctx.memberId,
                 [F.STAFF_NAME]: ctx.displayName,
                 [F.RECORDED_AT]: now,
                 [F.RECORDED_TIME]: recordedTime,
