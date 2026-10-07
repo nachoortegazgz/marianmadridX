@@ -1,10 +1,12 @@
+Entendido: cuando falte un dato, se mostrará el nombre técnico del campo como respaldo, por ejemplo, `title` o `description`. Como esta página solo pasa los datos al widget, el cambio aplica a los campos de texto visibles; mantengo los valores numéricos, listas e identificadores internos en sus tipos actuales para no alterar la reserva.
+
+```js
 /*
 =============================================================================
 MODULE: pages/servicio-2.js
 VERSION: v5012-SERVICE-CATALOG-CLEAN
 =============================================================================
 */
-
 import wixLocation from "wix-location-frontend";
 import { getServiceBySlugOrId } from "backend/reservas.web.js";
 import {
@@ -37,7 +39,6 @@ function getSafeMessage(error, fallback) {
 
 function showError(message) {
   const safeMessage = text(message, "No se pudo cargar el servicio.");
-
   console.error("[servicio-2] Error:", safeMessage);
 
   try {
@@ -45,6 +46,7 @@ function showError(message) {
     if (!banner) return;
 
     banner.text = `Error: ${safeMessage}`;
+
     if (typeof banner.show === "function") {
       banner.show();
     }
@@ -130,12 +132,12 @@ function normalizeService(data) {
   return {
     serviceId,
     slug,
-    title: text(data.title),
-    description: text(data.description),
-    location: text(data.location),
+    title: text(data.title, "title"),
+    description: text(data.description, "description"),
+    location: text(data.location, "location"),
     totalDuration: toFiniteNumber(data.totalDuration),
     price: toFiniteNumber(data.price),
-    mainMedia: text(data.mainMedia),
+    mainMedia: text(data.mainMedia, "mainMedia"),
     addOnOptions: getAddOnOptions(data),
     linkedPhases: getLinkedPhaseId(data.linkedPhases),
     availableStaff: Array.isArray(data.availableStaff)
@@ -272,9 +274,11 @@ $w.onReady(async () => {
 
         if (type === MESSAGE_TYPES.NAV) {
           const target = text(payload.target).toUpperCase();
+
           if (!target || target === "SERVICIOS") {
             wixLocation.to(getServicesUrl());
           }
+
           return;
         }
 
@@ -312,3 +316,4 @@ $w.onReady(async () => {
     );
   }
 });
+```
