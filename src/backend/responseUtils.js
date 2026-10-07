@@ -1,13 +1,19 @@
 /*
 =============================================================================
 MODULE: backend/responseUtils.js
-VERSION: v5009-FISCAL-V20.1
-BASE: v5007.4-FINAL + Directriz V20 (IDs nativa en ingles)
+VERSION: v5011-CLEAN-DEAD-EXPORTS
+BASE: v5009-FISCAL-V20.1
 RESPONSIBILITY: Respuestas publicas, errores controlados y normalizacion
                 de resultados de web methods.
 STANDARDS: G10 ASCII Strict.
            Sin dependencias de Node.js.
            Sin exposicion de stacks ni secretos.
+
+FIXES APLICADOS v5011-CLEAN-DEAD-EXPORTS:
+  - CLEAN-03: eliminados AppError, toWebMethodResult e isSuccess (cero
+    importadores en el repo). Se conservan successResponse, errorResponse
+    y _toPublicError, usados por security.web, cajas, fiscal*, inventario
+    y marianAssistant.
 
 FIXES APLICADOS v5009-FISCAL-V20.1:
   - V20-01: sin renombrados funcionales. El modulo importa _cloneDeep y
@@ -21,52 +27,19 @@ CORRECTIONS (heredadas):
 
 import { _cloneDeep, _safeTrim } from "public/mmUtils";
 
-// =============================================================================
-// BLOQUE 1 - CONSTANTES
-// =============================================================================
-
 const MAX_ERROR_MESSAGE_LENGTH = 500;
 const DEFAULT_ERROR_CODE = "INTERNAL_ERROR";
 const DEFAULT_ERROR_MESSAGE = "Error interno";
 const UNKNOWN_ERROR_CODE = "UNKNOWN_ERROR";
 
-// =============================================================================
-// BLOQUE 2 - ERROR DE APLICACION
-// =============================================================================
-
-export class AppError extends Error {
-    constructor(
-        code = DEFAULT_ERROR_CODE,
-        message = DEFAULT_ERROR_MESSAGE,
-        meta = {}
-    ) {
-        super(String(message || DEFAULT_ERROR_MESSAGE));
-
-        this.name = "AppError";
-        this.code = String(code || DEFAULT_ERROR_CODE);
-        this.meta = _cloneMeta(meta);
-
-        if (Error.captureStackTrace) {
-            Error.captureStackTrace(this, AppError);
-        }
-    }
-}
-
-// =============================================================================
-// BLOQUE 3 - HELPERS INTERNOS
-// =============================================================================
-
 function _cloneMeta(value) {
     if (!value || typeof value !== "object") {
         return value === undefined ? {} : { details: value };
     }
-
     try {
         return _cloneDeep(value);
     } catch {
-        return {
-            details: "Metadata could not be cloned safely.",
-        };
+        return { details: "Metadata could not be cloned safely." };
     }
 }
 
@@ -74,94 +47,56 @@ function _normalizeMeta(metaExtra) {
     if (!metaExtra || typeof metaExtra !== "object") {
         return {};
     }
-
     return _cloneMeta(metaExtra);
 }
 
-function _truncateMessage(value) {
-    const rawMessage =
-        value instanceof Error ?
-        value.message || String(value) :
-        String(value || "");
-
-    const safeMessage = _safeTrim(rawMessage);
-
-    if (safeMessage.length <= MAX_ERROR_MESSAGE_LENGTH) {
-        return safeMessage;
+function _truncateMessage(message) {
+    const text = _safeTrim(message) || DEFAULT_ERROR_MESSAGE;
+    if (text.length <= MAX_ERROR_MESSAGE_LENGTH) {
+        return text;
     }
-
-    return `${safeMessage.slice(0, MAX_ERROR_MESSAGE_LENGTH)}...`;
+    return text.slice(0, MAX_ERROR_MESSAGE_LENGTH - 3) + "...";
 }
 
-function _extractErrorValues(code, message) {
-    if (code instanceof Error) {
-        return {
-            code: code.code || code.name || UNKNOWN_ERROR_CODE,
-            message: code.message || DEFAULT_ERROR_MESSAGE,
-        };
+function _extractError(err) {
+    if (!err) {
+        return { code: DEFAULT_ERROR_CODE, message: DEFAULT_ERROR_MESSAGE };
     }
-
-    if (code && typeof code === "object") {
-        return {
-            code: code.code || code.name || UNKNOWN_ERROR_CODE,
-            message: code.message ||
-                code.error ||
-                code.reason ||
-                DEFAULT_ERROR_MESSAGE,
-        };
+    if (typeof err === "string") {
+        return { code: UNKNOWN_ERROR_CODE, message: err };
     }
-
-    if (
-        typeof code === "string" &&
-        (message === undefined || message === null)
-    ) {
-        return {
-            code: UNKNOWN_ERROR_CODE,
-            message: code,
-        };
-    }
-
     return {
-        code: code || DEFAULT_ERROR_CODE,
-        message: message || DEFAULT_ERROR_MESSAGE,
+        code: err.code || err.name || DEFAULT_ERROR_CODE,
+        message: err.message || DEFAULT_ERROR_MESSAGE,
     };
 }
 
-// =============================================================================
-// BLOQUE 4 - RESPUESTAS PUBLICAS
-// =============================================================================
-
 export function successResponse(data = null, metaExtra = {}) {
     const extra = _normalizeMeta(metaExtra);
-
     return {
         status: "SUCCESS",
-        meta: {
-            timestamp: new Date().toISOString(),
-            ...extra,
-        },
+        meta: { timestamp: new Date().toISOString(), ...extra },
         data,
         error: null,
     };
 }
 
 export function errorResponse(
-    code = DEFAULT_ERROR_CODE,
+    codeOrError = DEFAULT_ERROR_CODE,
     message = DEFAULT_ERROR_MESSAGE,
     metaExtra = {}
 ) {
-    const extracted = _extractErrorValues(code, message);
-    const safeMessage =
-        _truncateMessage(extracted.message) || DEFAULT_ERROR_MESSAGE;
-
+    const extracted =
+        codeOrError && typeof codeOrError === "object"
+            ? _extractError(codeOrError)
+            : { code: codeOrError, message };
+    const safeMessage = _truncateMessage(
+        extracted.message || message || DEFAULT_ERROR_MESSAGE
+    );
     const extra = _normalizeMeta(metaExtra);
-
     return {
         status: "ERROR",
-        meta: {
-            timestamp: new Date().toISOString(),
-            ...extra,
-        },
+        meta: { timestamp: new Date().toISOString(), ...extra },
         data: null,
         error: {
             code: String(extracted.code || DEFAULT_ERROR_CODE),
@@ -170,10 +105,6 @@ export function errorResponse(
     };
 }
 
-// =============================================================================
-// BLOQUE 5 - CONVERSION DE ERRORES PUBLICOS
-// =============================================================================
-
 export function _toPublicError(
     err,
     fallbackCode = DEFAULT_ERROR_CODE,
@@ -181,69 +112,8 @@ export function _toPublicError(
 ) {
     const code = err?.code || fallbackCode;
     const message = err?.message || fallbackMessage;
-
     return {
         code: String(code),
         message: _truncateMessage(message) || fallbackMessage,
     };
-}
-
-// =============================================================================
-// BLOQUE 6 - ENVOLTORIO DE WEB METHODS
-// =============================================================================
-
-export function toWebMethodResult(actionFn) {
-    if (typeof actionFn !== "function") {
-        throw new TypeError("actionFn must be a function");
-    }
-
-    return async (...args) => {
-        try {
-            const result = await actionFn(...args);
-
-            if (
-                result &&
-                typeof result === "object" &&
-                typeof result.status === "string"
-            ) {
-                return result;
-            }
-
-            return successResponse(result);
-        } catch (err) {
-            return errorResponse(
-                err?.code || err?.name || "OPERATION_FAILED",
-                err?.message || "No se pudo procesar la solicitud."
-            );
-        }
-    };
-}
-
-// =============================================================================
-// BLOQUE 7 - VALIDACION DE RESULTADOS
-// =============================================================================
-
-export function isSuccess(response) {
-    if (!response) {
-        return false;
-    }
-
-    if (response === true) {
-        return true;
-    }
-
-    const rawStatus =
-        response?.status ??
-        response?.payload?.status ??
-        response?.data?.status;
-
-    if (typeof rawStatus === "string") {
-        const normalizedStatus = rawStatus.trim().toUpperCase();
-
-        if (normalizedStatus === "SUCCESS" || normalizedStatus === "OK") {
-            return true;
-        }
-    }
-
-    return rawStatus === 200 || response?.success === true;
 }
