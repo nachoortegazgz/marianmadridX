@@ -1,23 +1,14 @@
 /*
 =============================================================================
 MODULE: backend/crons.js
-VERSION: v5011-CRON-PAIR
+VERSION: v5011-CRON-PAIR-SDKv2
 BASE: v5009-FISCAL-V20.1 + Plan de correccion (jobs.config <-> export parity)
 RESPONSIBILITY: Jobs programados (cron). 8 crons activos.
 STANDARDS: G10 ASCII Strict.
 
-FIXES APLICADOS v5009-FISCAL-V20.1:
-  - V20-01: sin renombrados funcionales. Los campos de
-            CompensacionesPendientes usados por este modulo ya estan
-            contemplados en V20.1-EXPANDED.
-
-FIXES APLICADOS v5011-CRON-PAIR:
-  - CRON-PARITY-01: verifyNightlyZClosing y cleanAuditLogs estaban
-                    declarados en jobs.config sin export en este modulo
-                    (el runner de Velo fallaria al resolver la funcion).
-                    Se implementan aqui como CRON 7 y CRON 8.
-
-CORRECTIONS (heredadas): CRON-01..CRON-06.
+FIXES APLICADOS SDK v2:
+  - Eliminado { suppressAuth: true } de cancelBookingElevated en 
+    _runOneCompensation.
 =============================================================================
 */
 
@@ -36,8 +27,6 @@ import {
     verifyFiscalHashChainIntegrity,
     registerZClosing,
 } from "backend/cajas.web.js";
-// [SSOT-v5010.1 ZOMB-02] backend/bookingServiceSync.js ELIMINADO. La cola BookingsServiceSyncQueue
-// se procesa via el modulo nativo de sincronizacion de servicios; no hay consumidor custom.
 import { cancelBookingElevated } from "backend/booking/bookingCore";
 
 const log = logger;
@@ -128,10 +117,8 @@ async function _runOneCompensation(comp, traceId) {
         }
 
         await withTimeout(
-            () =>
-            cancelBookingElevated(bookingId, {
-                suppressAuth: true,
-            }),
+            // SDK v2: cancelBookingElevated ya está elevada, no necesita suppressAuth
+            () => cancelBookingElevated(bookingId),
             API_TIMEOUT_MS,
             "cron:cancelBookingCompensation"
         );
@@ -142,7 +129,6 @@ async function _runOneCompensation(comp, traceId) {
     if (kind === "FISCAL_LEDGER" || kind === "RESYNC_LEDGER_ACCOUNTING") {
         try {
             const { registerBookingPayment } = await import("backend/cajas.web.js");
-            // v5010.7 SSOT: CompensacionesPendientes usa campo canonic totalAmount.
             const amount = Number(comp?.totalAmount);
             const hasAmount = Number.isFinite(amount) && amount !== 0;
             const transactionId = _safeTrim(comp?.transactionId);
@@ -392,25 +378,12 @@ export async function systemHealthCheck() {
 }
 
 // =============================================================================
-// CRON 7: verifyNightlyZClosing - 20 1 * * * (declarado en jobs.config)
-// Cierre Z automatico del dia anterior en hora Madrid. Delega en
-// registerZClosing (cajas.web.js), unica implementacion canonica del cierre.
-// Idempotencia por delegacion: si Z_YYYY-MM-DD ya existe, registerZClosing
-// responde Z_ALREADY_CLOSED y el cron lo trata como resultado benigno.
-// Si no hay movimientos ese dia (domingos sin actividad, festivos), NO es
-// fallo: se informa y se omite el cierre.
-// Restriccion de plataforma (ADR-09 follow-up): Velo no expone sesion de
-// miembro dentro de un cron, por lo que requireCajero() interno devuelve
-// ACCESS_DENIED. El cron interpreta ese codigo como "verificacion por
-// lectura": comprueba si el dia quedo efectivamente cerrado (cierre manual
-// del cajero) y solo alerta si falta el cierre.
+// CRON 7: verifyNightlyZClosing - 20 1 * * *
 // =============================================================================
 
 export async function verifyNightlyZClosing() {
     const traceId = makeTraceId("cron-zclosing");
     try {
-        // Dia anterior en hora Madrid (el cron corre a las 01:20 CET para
-        // cerrar el dia natural completo precedente).
         const targetYmd = _readDate(new Date(Date.now() - 24 * 60 * 60 * 1000));
         if (!targetYmd) {
             throw new Error("Unable to resolve previous day key (Europe/Madrid)");
@@ -433,16 +406,11 @@ export async function verifyNightlyZClosing() {
 
         const code = result?.error?.code || "Z_CLOSING_FAIL";
 
-        // Benign outcomes: nothing to close, or the day is already sealed.
         if (code === "NO_MOVEMENTS" || code === "Z_ALREADY_CLOSED") {
             log.info(`verifyNightlyZClosing benign outcome: ${code}`, { targetYmd, traceId });
             return;
         }
 
-        // ACCESS_DENIED desde el cron (Velo no da sesion de miembro a jobs):
-        // verificar por lectura si el dia quedo efectivamente cerrado por el
-        // cajero. Si existe, idempotente OK; si falta, alerta WARN (no throw:
-        // requiere accion humana, no re-ejecucion infinita del runner).
         if (code === "ACCESS_DENIED") {
             const zRow = await wixData
                 .get(BUSINESS_COLLECTIONS.HISTORICO_CIERRES_Z, `Z_${targetYmd}`, { suppressAuth: true })
@@ -474,8 +442,6 @@ export async function verifyNightlyZClosing() {
             return;
         }
 
-        // INTEGRITY_VIOLATION / APPROVER_REQUIRED / errores de config fiscal:
-        // requieren atencion humana inmediata (alerting onConsecutiveFailures: 1).
         await wixData
             .insert(
                 OPERATIONAL_COLLECTIONS.CONTROL_OPERATIVO, {
@@ -500,19 +466,9 @@ export async function verifyNightlyZClosing() {
 }
 
 // =============================================================================
-// CRON 8: cleanAuditLogs - 0 2 * * 0 (declarado en jobs.config)
-// Mantenimiento semanal de retencion: purga registros de auditoria/estado
-// terminal en ControlOperativo con mas de RETENTION_DAYS dias naturales.
-// Alcance deliberado (SSOT FASE4, 8-en-1): SOLO ALERT (cerrados o abiertos
-// antiguos), COMPENSATION (EXECUTED/FAILED terminales) y WEBHOOK_EVENT
-// procesados. Nunca se tocan SLOT_LOCK/DAYS_CACHE/DUAL_CACHE (los purgan los
-// crons 1/2/4 por expiresAt), BOOKING_TX ni RATE_LIMIT activos.
-// Append-only condicional (ADR-05): un WEBHOOK_EVENT sin estado procesado no
-// se elimina aunque supere la ventana de retencion; se alerta una vez.
+// CRON 8: cleanAuditLogs - 0 2 * * 0
 // =============================================================================
 
-// [SSOT] Retencion leida desde SDK_CONFIG.JOBS (internalConfig.js, unica
-// fuente de verdad). Fallback defensivo por si la clave falta en runtime.
 const AUDIT_RETENTION_DAYS =
     Number(SDK_CONFIG?.JOBS?.AUDIT_RETENTION_DAYS) || 90;
 const AUDIT_CLEAN_BATCH_SIZE = 1000;
@@ -522,10 +478,6 @@ export async function cleanAuditLogs() {
     try {
         const cutoff = new Date(Date.now() - AUDIT_RETENTION_DAYS * 24 * 60 * 60 * 1000);
 
-        // El filtro de "solo terminales" se aplica en memoria (no con un
-        // segundo .eq(status,...)): los no terminales antiguos cuentan para
-        // `kept` y quedan intactos. Criterio terminal == ADR-05 / hooks
-        // data.js ControlOperativo_beforeRemove.
         const res = await wixData
             .query(OPERATIONAL_COLLECTIONS.CONTROL_OPERATIVO)
             .lt("_createdDate", cutoff)
@@ -556,10 +508,6 @@ export async function cleanAuditLogs() {
                 continue;
             }
 
-            // remove() por objeto completo: Velo dispara beforeRemove con
-            // item={collectionName,data}; los hooks de data.js bloquean
-            // WEBHOOK_EVENT append-only. Ese bloqueo es la autoridad: si el
-            // hook rechaza la purga, NO se cuenta como eliminada.
             const rem = await wixData
                 .remove(OPERATIONAL_COLLECTIONS.CONTROL_OPERATIVO, item, { suppressAuth: true })
                 .catch(() => null);
