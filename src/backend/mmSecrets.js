@@ -1,10 +1,20 @@
 /*
 =============================================================================
 MODULE: backend/mmSecrets.js
-VERSION: v5009-FISCAL-V20.1
-BASE: v5007.5-FINAL + Directriz V20 (IDs nativa en ingles)
+VERSION: v5011-CLEAN-DEAD-SECRETS
+BASE: v5009-FISCAL-V20.1
 RESPONSIBILITY: Nombres canonicos de secretos Wix.
 STANDARDS: G10 ASCII Strict.
+
+FIXES APLICADOS v5011-CLEAN-DEAD-SECRETS:
+  - CLEAN-01: eliminados secretos sin consumidor en el repo:
+      POWER_AUTOMATE, SENDGRID_API_KEY, SENDGRID_FROM_EMAIL,
+      RESEND_API_KEY, RESEND_FROM_EMAIL,
+      M365_GRAPH_CLIENT_ID, M365_GRAPH_CLIENT_SECRET, M365_GRAPH_TENANT_ID,
+      M365_GRAPH_SITE_ID, M365_GRAPH_LIST_ID, M365_WEBHOOK_HMAC_KEY.
+    M365 y SendGrid/Resend quedaron sin feature activa; POWER_AUTOMATE
+    no tiene lecturas. Los secretos pueden seguir existiendo en Wix
+    Secrets Manager; este modulo solo declara nombres referenciados.
 
 FIXES APLICADOS v5009-FISCAL-V20.1:
   - V20-01: sin renombrados funcionales. Los nombres de secretos son
@@ -30,25 +40,8 @@ export const SECRETS = Object.freeze({
     ADMIN_EMAILS: "ADMIN_EMAILS",
     CAJERO_EMAILS: "CAJERO_EMAILS",
 
-    // Automatizacion
-    POWER_AUTOMATE: "POWER_AUTOMATE_TOKEN",
-
-    // Email (SendGrid legacy + Resend actual)
-    SENDGRID_API_KEY: "SENDGRID_API_KEY",
-    SENDGRID_FROM_EMAIL: "SENDGRID_FROM_EMAIL",
-    RESEND_API_KEY: "RESEND_API_KEY",
-    RESEND_FROM_EMAIL: "RESEND_FROM_EMAIL",
-
     // Asistente IA
     MARIAN_ASSISTANT_OPENAI_KEY: "MARIAN_ASSISTANT_OPENAI_KEY",
-
-    // Microsoft 365 Graph API
-    M365_GRAPH_CLIENT_ID: "M365_CLIENT_ID",
-    M365_GRAPH_CLIENT_SECRET: "M365_CLIENT_SECRET",
-    M365_GRAPH_TENANT_ID: "M365_TENANT_ID",
-    M365_GRAPH_SITE_ID: "M365_GRAPH_SITE_ID",
-    M365_GRAPH_LIST_ID: "M365_LIST_ID",
-    M365_WEBHOOK_HMAC_KEY: "SECRET_M365_WEBHOOK_HMAC_KEY",
 });
 
 /*
@@ -58,7 +51,7 @@ Legacy Velo used:  import { getSecret } from "wix-secrets-backend";
 @wix/secrets exposes secrets.getSecretValue(name) with the SAME positional
 signature, so this wrapper keeps every consumer call-site unchanged:
     await getSecret(SECRETS.FISCAL_KEY)   ->   secrets.getSecretValue(name)
-The 8 consumers now import { SECRETS, getSecret } from "backend/mmSecrets".
+Consumers import { SECRETS, getSecret } from "backend/mmSecrets".
 G10 ASCII strict. No secret values are ever hardcoded here (names only).
 -----------------------------------------------------------------------------
 */
