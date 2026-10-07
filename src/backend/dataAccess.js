@@ -1,13 +1,48 @@
 /*
 =============================================================================
 MODULE: backend/dataAccess.js
-VERSION: v9.0-SDKV2-ZERO-LEGACY
+VERSION: v9.0.1-SDKV2-ZERO-LEGACY (corregido contra contrato REAL del SDK)
 BASE: BIBLIA v8.0-SSOT-MASTER + ANEXO SSOT v8.1 + analisis-sdkv2
       (repo marianmadridX, rama main, commit b7effa3d)
 RESPONSIBILITY: Capa unica de acceso a datos (DAL) del backend de reservas.
   Contrato unico: @wix/data (namespace items) + @wix/essentials (auth.elevate).
 STANDARDS: G10 ASCII estricto. Sin console.log directo (logger SSOT).
 REEMPLAZA Y ELIMINA: backend/dataClient.js (fachada legacy wix-data).
+
+CORRECCIONES APLICADAS SOBRE EL BORRADOR ANTERIOR DE ESTE MODULO (verificado
+contra la documentacion oficial dev.wix.com, 2026-10; ver auditoria):
+  C1. items.count NO EXISTE como metodo de @wix/data (solo existen query,
+      get, insert, update, save, remove, queryReferencedItems). El borrador
+      anterior hacia auth.elevate(items.count) en codigo de nivel superior,
+      lo que rompe la carga del modulo para TODO consumidor (staff.js
+      incluido). countItems() se reimplementa sobre query() con
+      returnTotalCount: true (unica via real de conteo del SDK).
+  C2. ARIDAD REAL: get/insert/update/save/remove/query se invocan con TRES
+      argumentos posicionales -- items.<op>(dataCollectionId, payload,
+      options) -- NUNCA fusionando dataCollectionId dentro del objeto de
+      payload u opciones. El borrador anterior invertia el orden
+      (payload primero, dataCollectionId dentro de options).
+  C3. queryReferencedItems tiene 4 argumentos posicionales reales:
+      items.queryReferencedItems(dataCollectionId, referringItem, field,
+      options). El borrador anterior lo llamaba con 3 argumentos y forma
+      incorrecta.
+  C4. query.filter es un OBJETO (estilo MongoQL: $eq/$ne/$gt/$gte/$lt/$lte/
+      $in/$nin/$startsWith/$isEmpty/$exists/$hasAll/$hasSome + logicos
+      $and/$or/$not). "$contains" NO es un operador documentado de la Wix
+      API Query Language: wql.contains() se reimplementa sobre
+      "$startsWith" (coincide solo PREFIJOS; ver limitacion en cabecera de
+      dataClient.js) en vez de un operador inexistente que la API
+      rechazaria en tiempo de ejecucion.
+  C5. El campo real de conteo en la respuesta es pagingMetadata.total (no
+      "totalCount"). queryItems/countItems leian un campo que no existe y
+      devolvian siempre null/0.
+  C6. wql.byId usaba el campo "dataItemField._id", que no aparece en ningun
+      ejemplo oficial (los filtros referencian "_id" a secas). Corregido a
+      "_id".
+  C7. consistentRead (booleano) es la opcion real; no existe un enum
+      "consistency" STRONG/EVENTUAL en el contrato de items.*. CONSISTENCY
+      se mantiene como constante de conveniencia interna de este DAL, pero
+      se traduce a { consistentRead: true } al llamar al SDK.
 
 ORDEN DE ENTREGA DE LA MIGRACION (9 modulos, dominio reservas online):
   1/9 backend/dataAccess.js            <- ESTE MODULO (sustituye dataClient.js)
@@ -24,14 +59,17 @@ REGLAS DE MIGRACION APLICADAS (analisis-sdkv2.txt / seguro-migrar.txt):
   R1. suppressAuth NO es una opcion valida del SDK v2 instalado. El privilegio
       se construye elevando la OPERACION con auth.elevate, nunca propagando
       opciones legacy en el objeto de opciones.
-  R2. suppressHooks NO existe en SDK v2: los hooks de backend/data.js se
-      ejecutan SIEMPRE (SSOT-14). Ninguna escritura puede depender de
-      saltarlos; toda escritura del backend debe ser canonica y valida.
+  R2. suppressHooks NO existe conceptualmente para este DAL: los hooks de
+      backend/data.js se ejecutan SIEMPRE (SSOT-14). Ninguna escritura
+      puede depender de saltarlos; toda escritura del backend debe ser
+      canonica y valida. (suppressHooks SI es una opcion real del SDK si
+      algun consumidor excepcional la necesitase explicitamente, pero este
+      DAL no la expone por defecto.)
   R3. La lectura fuerte (mutex, transacciones, secuencias, idempotencia) se
-      preserva con consistency: 'STRONG', unica ruta verificada del DAL.
-  R4. Filtros WQL por OBJETO nativo del SDK v2 ($eq/$ne/$gt/$gte/$lt/$lte/
-      $in/$hasSome/$contains/$startsWith/$and/$or). Cero builder legacy,
-      cero concatenacion de strings WQL.
+      preserva con consistentRead: true, unica ruta verificada del DAL.
+  R4. Filtros por OBJETO nativo del SDK v2 ($eq/$ne/$gt/$gte/$lt/$lte/$in/
+      $hasSome/$startsWith/$and/$or). Cero builder legacy, cero
+      concatenacion de strings WQL.
   R5. Toda operacion de este DAL es ELEVADA (identidad de sistema): las
       colecciones activas son Admin-only y los webMethods publicos
       (Permissions.Anyone) no tienen sesion con permisos de CMS. Un handler
@@ -53,6 +91,8 @@ const log = logger;
 // =============================================================================
 // BLOQUE 1 - OPERACIONES ELEVADAS (elevacion unica, referencias estables)
 // =============================================================================
+// Solo se elevan metodos que REALMENTE existen en @wix/data. "items.count"
+// no es un metodo del SDK (ver C1) y se ha eliminado de este bloque.
 
 const elevated = Object.freeze({
   get: auth.elevate(items.get),
@@ -61,7 +101,6 @@ const elevated = Object.freeze({
   save: auth.elevate(items.save),
   remove: auth.elevate(items.remove),
   query: auth.elevate(items.query),
-  count: auth.elevate(items.count),
   queryReferencedItems: auth.elevate(items.queryReferencedItems),
 });
 
@@ -111,10 +150,12 @@ function _isStrongRead(options) {
   return Boolean(options && options.consistency === CONSISTENCY.STRONG);
 }
 
-function _consistencyOption(options) {
-  return _isStrongRead(options)
-    ? { consistency: CONSISTENCY.STRONG }
-    : undefined;
+// Traduce la constante interna CONSISTENCY a la opcion real del SDK v2
+// (consistentRead: boolean). No existe un enum "consistency" en el SDK.
+function _sdkOptionsFor(options) {
+  const sdk = {};
+  if (_isStrongRead(options)) sdk.consistentRead = true;
+  return sdk;
 }
 
 function _buildPaging(limit, offset) {
@@ -126,15 +167,17 @@ function _buildPaging(limit, offset) {
   return { limit: safeLimit, offset: safeOffset };
 }
 
-function _buildQuery(queryFilter, querySort, limit, offset) {
-  const query = { paging: _buildPaging(limit, offset) };
+// queryRequest real del SDK v2: { filter?, sort?, fields?, paging|cursorPaging }
+// -- SIN dataCollectionId dentro (va como primer argumento posicional).
+function _buildQueryRequest(queryFilter, querySort, limit, offset) {
+  const queryRequest = { paging: _buildPaging(limit, offset) };
   if (queryFilter && typeof queryFilter === "object") {
-    query.filter = queryFilter;
+    queryRequest.filter = queryFilter;
   }
   if (Array.isArray(querySort) && querySort.length > 0) {
-    query.sort = querySort;
+    queryRequest.sort = querySort;
   }
-  return query;
+  return queryRequest;
 }
 
 /**
@@ -153,12 +196,19 @@ function _normalizeItemList(list) {
   return Array.isArray(list) ? list.map(_normalizeItem) : [];
 }
 
+function _safeName(dataCollectionId) {
+  return typeof dataCollectionId === "string" ? dataCollectionId : "UNKNOWN";
+}
+
 // =============================================================================
-// BLOQUE 4 - CONSTRUCTORES DE FILTRO Y ORDEN (WQL por objeto, nativo SDK v2)
+// BLOQUE 4 - CONSTRUCTORES DE FILTRO Y ORDEN (objeto nativo SDK v2)
 // =============================================================================
+// Operadores verificados contra "About the Wix API Query Language":
+// $eq, $ne, $gt, $gte, $lt, $lte, $in, $nin, $startsWith, $isEmpty, $exists,
+// $hasAll, $hasSome, mas los logicos $and / $or / $not. NO existe "$contains".
 
 export const wql = Object.freeze({
-  byId: (value) => ({ "dataItemField._id": { $eq: String(value) } }),
+  byId: (value) => ({ "_id": { $eq: String(value) } }),
   eq: (field, value) => ({ [String(field)]: { $eq: value } }),
   ne: (field, value) => ({ [String(field)]: { $ne: value } }),
   gt: (field, value) => ({ [String(field)]: { $gt: value } }),
@@ -171,7 +221,11 @@ export const wql = Object.freeze({
   hasSome: (field, values) => ({
     [String(field)]: { $hasSome: Array.from(values || []) },
   }),
-  contains: (field, value) => ({ [String(field)]: { $contains: value } }),
+  // LIMITACION: la API Query Language publica no documenta un operador de
+  // subcadena generico. $startsWith es el operador real mas cercano, pero
+  // solo coincide PREFIJOS, no subcadenas en posicion arbitraria. Revisar
+  // caso a caso los call-sites que dependan de "contiene en cualquier
+  // posicion" (ver auditoria dataClient.js).
   startsWith: (field, value) => ({
     [String(field)]: { $startsWith: value },
   }),
@@ -204,6 +258,9 @@ export const order = Object.freeze({
 // =============================================================================
 // BLOQUE 5 - CLASIFICACION DE ERRORES DEL SDK
 // =============================================================================
+// NOTA: los codigos WDE0111/WDE0123 no estan confirmados contra la
+// documentacion oficial de codigos de error; se conservan como heuristica
+// adicional junto a httpCode/mensaje, que son las senales verificables.
 
 export function isNotFoundError(error) {
   const appError = error?.details?.applicationError || {};
@@ -248,10 +305,11 @@ export function isDuplicateKeyError(error) {
  * @returns {Promise<Object>} item con '_id' canonico.
  */
 export async function getItem(dataCollectionId, itemId, options = {}) {
-  const res = await elevated.get(_requireItemId(itemId), {
-    dataCollectionId: _requireCollectionId(dataCollectionId),
-    ...(_isStrongRead(options) ? { consistency: CONSISTENCY.STRONG } : {}),
-  });
+  const res = await elevated.get(
+    _requireCollectionId(dataCollectionId),
+    _requireItemId(itemId),
+    _sdkOptionsFor(options)
+  );
   return _normalizeItem(res);
 }
 
@@ -272,14 +330,16 @@ export async function getItemOrNull(dataCollectionId, itemId, options = {}) {
  * Insercion. Los hooks beforeInsert de data.js SE EJECUTAN (R2/SSOT-14).
  */
 export async function insertItem(dataCollectionId, item) {
-  const res = await elevated.insert(_requireItemObject(item), {
-    dataCollectionId: _requireCollectionId(dataCollectionId),
-  });
+  const res = await elevated.insert(
+    _requireCollectionId(dataCollectionId),
+    _requireItemObject(item),
+    {}
+  );
   return _normalizeItem(res);
 }
 
 /**
- * Actualizacion parcial por documento completo (debe incluir _id).
+ * Actualizacion por documento completo (debe incluir _id).
  * Los hooks beforeUpdate de data.js SE EJECUTAN (R2/SSOT-14).
  */
 export async function updateItem(dataCollectionId, item) {
@@ -289,9 +349,11 @@ export async function updateItem(dataCollectionId, item) {
   }
   const payload =
     doc._id === undefined ? Object.assign({}, doc, { _id: doc.id }) : doc;
-  const res = await elevated.update(payload, {
-    dataCollectionId: _requireCollectionId(dataCollectionId),
-  });
+  const res = await elevated.update(
+    _requireCollectionId(dataCollectionId),
+    payload,
+    {}
+  );
   return _normalizeItem(res);
 }
 
@@ -299,9 +361,11 @@ export async function updateItem(dataCollectionId, item) {
  * Upsert: inserta si no existe, actualiza si existe (por _id).
  */
 export async function saveItem(dataCollectionId, item) {
-  const res = await elevated.save(_requireItemObject(item), {
-    dataCollectionId: _requireCollectionId(dataCollectionId),
-  });
+  const res = await elevated.save(
+    _requireCollectionId(dataCollectionId),
+    _requireItemObject(item),
+    {}
+  );
   return _normalizeItem(res);
 }
 
@@ -310,9 +374,11 @@ export async function saveItem(dataCollectionId, item) {
  * append-only rechazaran la operacion por normativa (SSOT-05).
  */
 export async function removeItem(dataCollectionId, itemId) {
-  await elevated.remove(_requireItemId(itemId), {
-    dataCollectionId: _requireCollectionId(dataCollectionId),
-  });
+  await elevated.remove(
+    _requireCollectionId(dataCollectionId),
+    _requireItemId(itemId),
+    {}
+  );
 }
 
 /**
@@ -332,7 +398,7 @@ export async function removeItemIfPresent(dataCollectionId, itemId) {
  * Query de una pagina.
  * @param {Object} params
  * @param {string} params.dataCollectionId
- * @param {Object} [params.filter]  filtro WQL por objeto (constructores wql.*)
+ * @param {Object} [params.filter]  filtro por objeto (constructores wql.*)
  * @param {Array}  [params.sort]    orden (constructores order.*)
  * @param {number} [params.limit=50]   maximo 1000
  * @param {number} [params.offset=0]
@@ -348,19 +414,20 @@ export async function queryItems(params = {}) {
     offset,
     consistency,
   } = params;
-  const request = {
-    dataCollectionId: _requireCollectionId(dataCollectionId),
-    query: _buildQuery(queryFilter, querySort, limit, offset),
-  };
+  const queryRequest = _buildQueryRequest(queryFilter, querySort, limit, offset);
+  const sdkOpts = Object.assign(
+    { returnTotalCount: true },
+    consistency === CONSISTENCY.STRONG ? { consistentRead: true } : {}
+  );
   const res = await elevated.query(
-    request,
-    consistency === CONSISTENCY.STRONG
-      ? { consistency: CONSISTENCY.STRONG }
-      : undefined
+    _requireCollectionId(dataCollectionId),
+    queryRequest,
+    sdkOpts
   );
   const meta = res?.pagingMetadata || null;
   const list = _normalizeItemList(res?.items);
-  const rawTotal = Number(meta?.totalCount);
+  // Campo real de la respuesta: pagingMetadata.total (no "totalCount").
+  const rawTotal = Number(meta?.total);
   return {
     items: list,
     totalCount: Number.isFinite(rawTotal) ? rawTotal : null,
@@ -425,23 +492,20 @@ export async function queryAllPages(params = {}) {
 
 /**
  * Conteo con filtro opcional.
+ * NOTA (C1): items.count no existe en el SDK; se implementa sobre query()
+ * pidiendo returnTotalCount: true y paginando 1 solo item (minimiza payload
+ * de transferencia manteniendo el total real en pagingMetadata.total).
  */
 export async function countItems(params = {}) {
   const { dataCollectionId, filter: queryFilter, consistency } = params;
-  const request = {
-    dataCollectionId: _requireCollectionId(dataCollectionId),
-  };
-  if (queryFilter && typeof queryFilter === "object") {
-    request.query = { filter: queryFilter };
-  }
-  const res = await elevated.count(
-    request,
-    consistency === CONSISTENCY.STRONG
-      ? { consistency: CONSISTENCY.STRONG }
-      : undefined
-  );
-  const total = Number(res?.totalCount);
-  return Number.isFinite(total) ? total : 0;
+  const res = await queryItems({
+    dataCollectionId,
+    filter: queryFilter,
+    limit: 1,
+    offset: 0,
+    consistency,
+  });
+  return res.totalCount != null ? res.totalCount : 0;
 }
 
 /**
@@ -462,27 +526,25 @@ export async function queryReferencedItems(
       "DAL_INVALID_REFERENCE_FIELD: referenceFieldName es obligatorio"
     );
   }
+  // Firma real: items.queryReferencedItems(dataCollectionId, referringItem,
+  // field, options) -- 4 argumentos posicionales (ver C3).
   const res = await elevated.queryReferencedItems(
+    _requireCollectionId(dataCollectionId),
     _requireItemId(itemId),
-    {
-      dataCollectionId: _requireCollectionId(dataCollectionId),
-      referenceFieldName: field,
-    },
-    _consistencyOption(options)
+    field,
+    _sdkOptionsFor(options)
   );
-  return _normalizeItemList(res?.items);
+  // La respuesta real trae "results" (items resueltos o unresolvedReference),
+  // no "items"; se filtra a los items efectivamente resueltos.
+  const results = Array.isArray(res?.results) ? res.results : [];
+  const resolved = results
+    .map((r) => (r && typeof r === "object" && !r.unresolvedReference ? r : null))
+    .filter(Boolean);
+  return _normalizeItemList(resolved);
 }
 
 // =============================================================================
-// BLOQUE 7 - HELPER DE LOG SEGURO (no filtra valores de filtro/datos)
-// =============================================================================
-
-function _safeName(dataCollectionId) {
-  return typeof dataCollectionId === "string" ? dataCollectionId : "UNKNOWN";
-}
-
-// =============================================================================
-// BLOQUE 8 - GUARD SSOT (SSOT-09 / SSOT-15)
+// BLOQUE 7 - GUARD SSOT (SSOT-09 / SSOT-15)
 // =============================================================================
 
 /**
