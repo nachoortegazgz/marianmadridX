@@ -1,6 +1,3 @@
-Entendido: cuando falte un dato, se mostrará el nombre técnico del campo como respaldo, por ejemplo, `title` o `description`. Como esta página solo pasa los datos al widget, el cambio aplica a los campos de texto visibles; mantengo los valores numéricos, listas e identificadores internos en sus tipos actuales para no alterar la reserva.
-
-```js
 /*
 =============================================================================
 MODULE: pages/servicio-2.js
@@ -316,4 +313,3 @@ $w.onReady(async () => {
     );
   }
 });
-```
