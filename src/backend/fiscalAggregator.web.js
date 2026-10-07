@@ -70,14 +70,12 @@ function _readTaxAmount(m) {
 }
 
 function _readTaxRate(m) {
-  // Canonical AEAT: tipoImpositivo (BIBLIA 11.4). Neither taxRate nor tasaIva
-  // is canonical; both are transitional read adapters only (EOL 31/12/2026).
+  // Canonical AEAT: tipoImpositivo (BIBLIA 11.4). Transitional read adapter
+  // for legacy tasaIva kept until EOL 31/12/2026 (same contract as the other
+  // _read* helpers in this module). The CUSTOM alias taxRate was eradicated
+  // repo-wide in FASE8-DEBT (ADR-11 supersedido por unificacion canonica).
   if (m.tipoImpositivo !== undefined && m.tipoImpositivo !== null) {
     return Number(m.tipoImpositivo);
-  }
-  if (m.taxRate !== undefined && m.taxRate !== null) {
-    log.warn("legacy-read taxRate", { id: m?._id });
-    return Number(m.taxRate);
   }
   log.warn("legacy-read tasaIva", { id: m?._id });
   return Number(m.tasaIva ?? 0);
@@ -112,7 +110,7 @@ function _readLinkedBookingIds(m) {
 }
 
 function _readInvoiceNumber(m) {
-  return _safeTrim(m.invoiceNumber ?? m.numTicketFactura);
+  return _safeTrim(m.numSerieFactura ?? m.numTicketFactura);
 }
 
 function _readOperationDate(m) {
@@ -191,8 +189,8 @@ function _accumulatePage(items, state) {
     const taxAmount = _readTaxAmount(m);
     const mes = _safeTrim(m.fiscalPeriod || m.mesKey);
     const paymentMethod = _readPaymentMethod(m);
-    const taxRate = _readTaxRate(m);
-    const taxRateKey = String(taxRate);
+    const tipoImpositivo = _readTaxRate(m);
+    const taxRateKey = String(tipoImpositivo);
     const movementType = _readMovementType(m).toUpperCase();
     const operationNature = _readOperationNature(m) || (
       movementType === MOVEMENT_TYPE.PROPINA ? "PROPINA" :
@@ -237,7 +235,7 @@ function _accumulatePage(items, state) {
     }
 
     if (!state.breakdownByVatRate[taxRateKey]) {
-      state.breakdownByVatRate[taxRateKey] = { taxRate, taxableAmount: 0, taxAmount: 0, total: 0, operations: 0 };
+      state.breakdownByVatRate[taxRateKey] = { tipoImpositivo, taxableAmount: 0, taxAmount: 0, total: 0, operations: 0 };
     }
     state.breakdownByVatRate[taxRateKey].taxableAmount += taxableAmount;
     state.breakdownByVatRate[taxRateKey].taxAmount += taxAmount;
@@ -255,7 +253,7 @@ async function _fetchQuarterMovements(months, options = {}) {
     .limit(pageSize);
 
   let res = await withTimeout(
-    query.find({ suppressAuth: true, consistentRead: false }),
+    query.find({ suppressAuth: true, consistencyMode: "eventual" }),
     CMS_TIMEOUT_MS,
     "fetchQuarterMovements:p1"
   );
@@ -266,7 +264,7 @@ async function _fetchQuarterMovements(months, options = {}) {
   let reachedMaxPages = false;
   while (res && res.hasNext() && page <= limit) {
     res = await withTimeout(
-      res.next({ suppressAuth: true, consistentRead: false }),
+      res.next({ suppressAuth: true, consistencyMode: "eventual" }),
       CMS_TIMEOUT_MS,
       `fetchQuarterMovements:p${page}`
     );
@@ -364,7 +362,7 @@ export async function getQuarterlyTaxSummaryInternal(year, quarter, options = {}
         operaciones: state.breakdownByMonth[mesKey].count,
       })),
       desgloseTipoIva: Object.values(state.breakdownByVatRate).map((item) => ({
-        tasaIva: item.taxRate,
+        tasaIva: item.tipoImpositivo,
         baseImponible: _roundMoney(item.taxableAmount),
         cuotaIva: _roundMoney(item.taxAmount),
         total: _roundMoney(item.total),
@@ -409,7 +407,7 @@ export async function getLibroRegistroFacturasExpedidasInternal(year, quarter, o
 
     libroFilas.push({
       orden: orderIndex++,
-      invoiceNumber: _readInvoiceNumber(m),
+      numSerieFactura: _readInvoiceNumber(m),
       fechaExpedicion: _readOperationDate(m),
       tipoFactura: isRefund ? "R1" : "BORRADOR_INTERNO",
       movementType: _readMovementType(m),
@@ -419,7 +417,7 @@ export async function getLibroRegistroFacturasExpedidasInternal(year, quarter, o
       referenciaRectificativa: _readPreviousInvoiceId(m),
       paymentMethod: _safeTrim(m.paymentMethod ?? m.medioPago),
       taxableAmount: _roundMoney(_readTaxableAmount(m)),
-      taxRate: `${Math.round(_readTaxRate(m) * 100)}%`,
+      tipoImpositivo: `${Math.round(_readTaxRate(m) * 100)}%`,
       taxAmount: _roundMoney(_readTaxAmount(m)),
       totalAmount: _roundMoney(accountingAmount),
       concepto: _readOperationDescription(m),

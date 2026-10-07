@@ -43,7 +43,7 @@ import {
     FISCAL_ROLE,
 } from "backend/internalConfig";
 
-import { SECRETS } from "backend/mmSecrets";
+import { SECRETS, getSecret } from "backend/mmSecrets";
 import { requireCajero, rateLimiter } from "backend/security";
 
 import {
@@ -238,7 +238,7 @@ function _formatAEATDateTimeMadrid(date) {
 function _buildAEATPayload(movement, generatedAt) {
     const fields = [
         ["IDEmisorFactura", movement.issuerTaxId || ""],
-        ["NumSerieFactura", movement.invoiceNumber || ""],
+        ["NumSerieFactura", movement.numSerieFactura || ""],
         ["FechaExpedicionFactura", _formatAEATDate(movement.invoiceIssueDate)],
         ["TipoFactura", movement.invoiceType || TIPO_FACTURA.F1],
         ["CuotaTotal", String(Number(movement.taxAmount || 0).toFixed(2))],
@@ -345,11 +345,11 @@ async function _computeSignature(currentHash, traceId) {
 // QR DE VERIFICACION
 // ============================================================================
 
-function _generateVerificationQR(invoiceNumber, issuerTaxId, invoiceIssueDate, totalAmount) {
+function _generateVerificationQR(numSerieFactura, issuerTaxId, invoiceIssueDate, totalAmount) {
     const baseUrl = "https://www2.agenciatributaria.gob.es/wlpl/TIKE-CONT/ValidarQR";
     const params = [
         `nif=${encodeURIComponent(issuerTaxId)}`,
-        `numserie=${encodeURIComponent(invoiceNumber)}`,
+        `numserie=${encodeURIComponent(numSerieFactura)}`,
         `fecha=${encodeURIComponent(invoiceIssueDate)}`,
         `importe=${encodeURIComponent(String(totalAmount))}`,
     ];
@@ -381,7 +381,7 @@ async function _getLastMovement() {
         .query(BUSINESS_COLLECTIONS.MOVIMIENTOS_CAJA)
         .descending("sequenceNumber")
         .limit(1)
-        .find({ suppressAuth: true, consistentRead: true });
+        .find({ suppressAuth: true, consistencyMode: "strong" });
     return res?.items?.[0] || null;
 }
 
@@ -579,7 +579,7 @@ export const registerManualTransaction = webMethod(Permissions.SiteMember, async
                 .query(BUSINESS_COLLECTIONS.MOVIMIENTOS_CAJA)
                 .eq("transactionId", transactionId)
                 .limit(1)
-                .find({ suppressAuth: true, consistentRead: true });
+                .find({ suppressAuth: true, consistencyMode: "strong" });
 
             if (existingRes?.items?.length > 0) {
                 log.info("Ledger idempotent duplicate detected", { transactionId, traceId });
@@ -620,7 +620,7 @@ export const registerManualTransaction = webMethod(Permissions.SiteMember, async
 
             const baseMovement = {
                 sequenceNumber: seq.sequenceNumber,
-                invoiceNumber: seq.invoiceNumber,
+                numSerieFactura: seq.numSerieFactura,
                 invoiceIssueDate: operationDate,
                 operationDate,
                 fiscalPeriod: operationDate.slice(0, 7),
@@ -708,7 +708,7 @@ export const registerManualTransaction = webMethod(Permissions.SiteMember, async
             }
 
             const verificationQR = _generateVerificationQR(
-                baseMovement.invoiceNumber,
+                baseMovement.numSerieFactura,
                 issuerTaxId,
                 operationDate,
                 amount
@@ -1108,8 +1108,8 @@ export const registerZClosing = webMethod(Permissions.SiteMember, async (diaKey,
             totalOperations: allMovements.length,
             startSequence: Number(firstMovement?.sequenceNumber) || 0,
             endSequence: Number(lastMovement?.sequenceNumber) || 0,
-            startTicketNumber: firstMovement?.invoiceNumber || "",
-            endTicketNumber: lastMovement?.invoiceNumber || "",
+            startTicketNumber: firstMovement?.numSerieFactura || "",
+            endTicketNumber: lastMovement?.numSerieFactura || "",
             startRecordHash: firstMovement?.previousRecordHash || GENESIS_HASH,
             endRecordHash: lastMovement?.recordHash || GENESIS_HASH,
             movementTypeBreakdown,
@@ -1164,7 +1164,7 @@ export async function verifyFiscalHashChainIntegrity(options = {}) {
             if (mov.previousRecordHash && mov.previousRecordHash !== expectedPreviousHash) {
                 breaks.push({
                     movementId: mov._id,
-                    invoiceNumber: mov.invoiceNumber,
+                    numSerieFactura: mov.numSerieFactura,
                     expected: expectedPreviousHash,
                     actual: mov.previousRecordHash,
                 });
@@ -1217,7 +1217,7 @@ export const registerGiftCardSale = webMethod(Permissions.SiteMember, async (pay
             .query(BUSINESS_COLLECTIONS.MOVIMIENTOS_CAJA)
             .eq("transactionId", `GC_SALE-${giftCardId}`)
             .limit(1)
-            .find({ suppressAuth: true, consistentRead: true });
+            .find({ suppressAuth: true, consistencyMode: "strong" });
 
         if (existingRes?.items?.length > 0) {
             return { status: "SUCCESS", data: existingRes.items[0], error: null, idempotent: true };
@@ -1234,7 +1234,7 @@ export const registerGiftCardSale = webMethod(Permissions.SiteMember, async (pay
 
             const baseMovement = {
                 sequenceNumber: seq.sequenceNumber,
-                invoiceNumber: seq.invoiceNumber,
+                numSerieFactura: seq.numSerieFactura,
                 invoiceIssueDate: operationDate,
                 operationDate,
                 fiscalPeriod: operationDate.slice(0, 7),
@@ -1303,7 +1303,7 @@ export const registerGiftCardSale = webMethod(Permissions.SiteMember, async (pay
                 };
             }
 
-            const verificationQR = _generateVerificationQR(baseMovement.invoiceNumber, issuerTaxId, operationDate, totalAmount);
+            const verificationQR = _generateVerificationQR(baseMovement.numSerieFactura, issuerTaxId, operationDate, totalAmount);
 
             const movement = {
                 ...baseMovement,
@@ -1365,7 +1365,7 @@ export const registerGiftCardRedemption = webMethod(Permissions.SiteMember, asyn
             .query(BUSINESS_COLLECTIONS.MOVIMIENTOS_CAJA)
             .eq("transactionId", redemptionId)
             .limit(1)
-            .find({ suppressAuth: true, consistentRead: true });
+            .find({ suppressAuth: true, consistencyMode: "strong" });
 
         if (existingRedemption?.items?.length > 0) {
             log.info("Gift card redemption idempotent duplicate detected", { redemptionId, giftCardId, traceId });
@@ -1400,7 +1400,7 @@ export const registerGiftCardRedemption = webMethod(Permissions.SiteMember, asyn
 
             const baseMovement = {
                 sequenceNumber: seq.sequenceNumber,
-                invoiceNumber: seq.invoiceNumber,
+                numSerieFactura: seq.numSerieFactura,
                 invoiceIssueDate: operationDate,
                 operationDate,
                 fiscalPeriod: operationDate.slice(0, 7),
@@ -1469,7 +1469,7 @@ export const registerGiftCardRedemption = webMethod(Permissions.SiteMember, asyn
                 };
             }
 
-            const verificationQR = _generateVerificationQR(baseMovement.invoiceNumber, issuerTaxId, operationDate, totalAmount);
+            const verificationQR = _generateVerificationQR(baseMovement.numSerieFactura, issuerTaxId, operationDate, totalAmount);
 
             const movement = {
                 ...baseMovement,
@@ -1505,7 +1505,7 @@ export const registerGiftCardRedemption = webMethod(Permissions.SiteMember, asyn
 // ----------------------------------------------------------------------------
 // Lectura del apunte append-only del ledger (MovimientosCaja, SSOT fiscal
 // unico) vinculado a una reserva. Publica SOLO la proyeccion minima que el
-// recibo Verifactu necesita (nomenclatura V20.1): invoiceNumber,
+// recibo Verifactu necesita (nomenclatura V20.1): numSerieFactura,
 // invoiceIssueDate, totalAmount, recordHash, digitalSignature, issuerTaxId y
 // verificationQR ya generado por _generateVerificationQR (TIKE-CONT).
 // No expone lineItems, datos de terceros (recipientTaxId) ni payloads B2B.
@@ -1579,7 +1579,7 @@ export const getMovimientoByBooking = webMethod(
                 meta: { traceId },
                 data: {
                     _id: mov._id,
-                    invoiceNumber: mov.invoiceNumber || null,
+                    numSerieFactura: mov.numSerieFactura || null,
                     invoiceIssueDate: mov.invoiceIssueDate || null,
                     totalAmount: mov.totalAmount ?? null,
                     issuerTaxId: mov.issuerTaxId || null,

@@ -18,7 +18,10 @@ CORRECTIONS APPLIED (ANEXO v8.1):
 */
 
 import wixData from "backend/dataClient";
+import { currentMember } from "@wix/members";
+
 import { members } from "@wix/members";
+ 
 
 import {
     BUSINESS_COLLECTIONS,

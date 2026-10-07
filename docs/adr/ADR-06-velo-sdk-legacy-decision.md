@@ -2,7 +2,9 @@
 
 Fecha: 2026-10-02
 Estado: Aceptada
-Alcance: Etapa A (correcciones seguras) ejecutada; Etapas B-D registradas.
+Alcance: Etapa A (correcciones seguras) ejecutada; Etapa C EJECUTADA
+(FASE8-C1/C2, ver ADR-10 docs/adr/ADR-10-sdk-v2-data-migration.md);
+Etapas B y D registradas como pendientes.
 
 ## Contexto
 
@@ -136,3 +138,32 @@ superficie Stores real = cero codigo propio; decision NO MIGRAR confirmada.
 - Pendientes gobernados: Etapa B (Members SDK, requiere instalacion del
   paquete), Etapa C (data, requiere pruebas de igualdad), Etapa D
   (routing/UI, requiere cobertura SDK).
+
+## Ejecucion Etapa C (FASE8-C1/C2, 2026-10-07) -- EJECUTADA
+
+Etapa C marcada como EJECUTADA. Detalle completo de decisiones, verificaciones
+y correcciones sobre el plan original en ADR-10
+(`docs/adr/ADR-10-sdk-v2-data-migration.md`). Resumen:
+
+- DAL unico `src/backend/dataClient.js` sobre la superficie real de
+  `@wix/data` (`items.*`), con firma compatible wix-data; 18 modulos
+  backend importan ahora `backend/dataClient` (0 residuos `wix-data`).
+- `consistentRead` sustituido en call-sites por `consistencyMode:
+  "strong"` (17) / `"eventual"` (2); lectura fuerte de CAJA_SEQ preservada
+  (RD 1619/2012).
+- Secretos via wrapper canonico `getSecret(name)` en `mmSecrets.js` sobre
+  `secrets.getSecretValue` de `@wix/secrets` (firma posicional real del
+  paquete; NO `getSecret({name})` como asumia el plan). 8 consumidores
+  fusionados; 0 residuos `wix-secrets-backend`.
+- `@wix/members` x3 y `@wix/ecom` x1 aplicados. Nota de alcance: T5/T6
+  cambian solo el especificador; la superficie invocada
+  (`currentMember.getMember()`, `orders.getOrder()`) difiere de la API
+  funcional de esos paquetes y queda pendiente de validacion E2E en
+  preview antes de publicar (ver ADR-10 Riesgo R7).
+- Harness offline: rama dedicada `mock:@wix/data` delegando en
+  `wixDataMock` + export `secrets.getSecretValue` determinista; mock
+  ampliado con contrato de cursor (`totalCount`, `hasNext()`, `next()`).
+- Igualdad verificada: bateria offline 57/57 verde, identica al baseline
+  pre-migracion (misma semantica de store a traves del DAL).
+- Whitelist de gobernanza: `contabilidad.js` y `marianAssistant.web.js`
+  permanecen activos pese a BIBLIA 13.2 (consumidores vivos; ver ADR-10).

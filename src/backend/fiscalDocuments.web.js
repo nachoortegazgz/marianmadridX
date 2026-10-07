@@ -9,13 +9,14 @@ STANDARDS: G10 ASCII Strict.
 
 import { webMethod, Permissions } from "wix-web-module";
 import wixData from "backend/dataClient";
+
 import { secrets } from "@wix/secrets";
 
 import {
   BUSINESS_COLLECTIONS,
   SDK_CONFIG,
 } from "backend/internalConfig";
-import { SECRETS } from "backend/mmSecrets";
+import { SECRETS, getSecret } from "backend/mmSecrets";
 import { makeTraceId, _safeTrim, withTimeout, _roundMoney } from "public/mmUtils";
 import { requireMarianManager } from "backend/security";
 import { _toPublicError } from "backend/responseUtils";
@@ -66,7 +67,7 @@ function _buildCsvFromInvoices(invoices) {
 
   const header = "Numero;Fecha;Tipo;Base;Cuota;Total;FormaPago;Hash\n";
   const rows = invoices.map((invoice) => {
-    const invoiceNumber = _readInvoiceValue(invoice, "invoiceNumber", "numTicketFactura");
+    const numSerieFactura = _readInvoiceValue(invoice, "numSerieFactura", "numTicketFactura");
     const issueDate = _readInvoiceValue(invoice, "issueDate", "fechaExpedicion", "diaKey");
     const movementType = _readInvoiceValue(invoice, "movementType", "tipoMovimiento");
     const taxableAmount = Number(_readInvoiceValue(invoice, "taxableAmount", "baseImponible") || 0);
@@ -76,7 +77,7 @@ function _buildCsvFromInvoices(invoices) {
     const recordHash = _readInvoiceValue(invoice, "hashCompleto", "recordHash", "currentRecordHash", "hashCadena");
 
     return [
-      invoiceNumber,
+      numSerieFactura,
       issueDate,
       movementType,
       _roundMoney(taxableAmount),

@@ -508,7 +508,7 @@ async function _getLock(slotClave) {
     const k = String(slotClave || "");
     if (!k) return null;
     const item = await wixData
-        .get(LOCKS_COL, _safeLockId(k), { suppressAuth: true, consistentRead: true })
+        .get(LOCKS_COL, _safeLockId(k), { suppressAuth: true, consistencyMode: "strong" })
         .catch(() => null);
     if (!item) return null;
     if (item.expiresAt) item.expiresAt = _toDateSafe(item.expiresAt);
@@ -633,7 +633,7 @@ const TRANSACTION_MAX_WAIT_MS = Number(CONCURRENCY?.TRANSACTION_MAX_WAIT_MS) || 
 async function _getTransactionById(pairToken) {
     const id = String(pairToken || "");
     if (!id) return null;
-    return await wixData.get(TRANSACTIONS_COL, id, { suppressAuth: true, consistentRead: true }).catch(() => null);
+    return await wixData.get(TRANSACTIONS_COL, id, { suppressAuth: true, consistencyMode: "strong" }).catch(() => null);
 }
 
 export async function _initTransaction(pairToken, payloadHash, traceId) {
@@ -1140,7 +1140,7 @@ export async function _rankResourcesByLoad(resourceIds, dateYmd, traceId) {
                 .in("resourceId", input)
                 .limit(pageSize)
                 .skip(skip)
-                .find({ suppressAuth: true, consistentRead: true });
+                .find({ suppressAuth: true, consistencyMode: "strong" });
 
             const items = Array.isArray(result?.items) ? result.items : [];
 

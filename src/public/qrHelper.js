@@ -20,7 +20,7 @@ FIXES APLICADOS v5010.1:
 
 FIXES APLICADOS v5009-FISCAL-V20.1:
   - V20-01: lecturas de campos de MovimientosCaja migradas a nomenclatura
-            V20.1 (issuerTaxId, invoiceNumber, invoiceIssueDate, totalAmount,
+            V20.1 (issuerTaxId, numSerieFactura, invoiceIssueDate, totalAmount,
             recordHash, digitalSignature, recordTimestamp).
   - V20-02: fallback legacy preservado para consumidores no migrados.
   - V20-03: businessTaxId deprecated (apunta a issuerTaxId).
@@ -136,9 +136,7 @@ function _readIssuerTaxId(movimiento, options) {
 
 function _readInvoiceNumber(movimiento) {
     return _safeString(
-        movimiento?.invoiceNumber ||
         movimiento?.numSerieFactura ||
-        movimiento?.numFactura ||
         movimiento?.numTicketFactura
     );
 }
@@ -194,8 +192,8 @@ export function generateVerifactuQrUrl(params = {}) {
         params.nifEmisor
     );
 
-    const invoiceNumber = _safeString(
-        params.invoiceNumber ||
+    const numSerieFactura = _safeString(
+        params.numSerieFactura ||
         params.numSerieFactura ||
         params.numFactura ||
         params.numTicketFactura
@@ -224,7 +222,7 @@ export function generateVerifactuQrUrl(params = {}) {
         params.currentRecordHash
     );
 
-    if (!issuerTaxId || !invoiceNumber || !invoiceIssueDate) {
+    if (!issuerTaxId || !numSerieFactura || !invoiceIssueDate) {
         return null;
     }
 
@@ -232,7 +230,7 @@ export function generateVerifactuQrUrl(params = {}) {
     // Se preserva el orden canonico y se excluye hash vacio.
     const parts = [
         `nif=${encodeURIComponent(issuerTaxId)}`,
-        `numserie=${encodeURIComponent(invoiceNumber)}`,
+        `numserie=${encodeURIComponent(numSerieFactura)}`,
         `fecha=${encodeURIComponent(invoiceIssueDate)}`,
         `importe=${encodeURIComponent(String(totalAmount))}`,
     ];
@@ -265,7 +263,7 @@ export function extractVerifactuData(
     options = {}
 ) {
     const issuerTaxId = _readIssuerTaxId(movimiento, options);
-    const invoiceNumber = _readInvoiceNumber(movimiento);
+    const numSerieFactura = _readInvoiceNumber(movimiento);
     const invoiceIssueDate = _resolveInvoiceDate(movimiento);
     const totalAmount = _readTotalAmount(movimiento);
     const recordHash = _readRecordHash(movimiento);
@@ -273,7 +271,7 @@ export function extractVerifactuData(
 
     const qrUrl = generateVerifactuQrUrl({
         issuerTaxId,
-        invoiceNumber,
+        numSerieFactura,
         invoiceIssueDate,
         totalAmount,
         recordHash,
@@ -281,7 +279,7 @@ export function extractVerifactuData(
 
     return {
         issuerTaxId,
-        invoiceNumber,
+        numSerieFactura,
         invoiceIssueDate,
         totalAmount,
         recordHash,
@@ -312,7 +310,7 @@ export function buildVerifactuReceiptHtml(
 <div style="font-family:Arial,sans-serif;padding:16px;border:1px solid #ccc;border-radius:8px;">
   <h3 style="margin:0 0 12px;">Factura Simplificada</h3>
   <p><strong>NIF Emisor:</strong> ${_escapeHtml(data.issuerTaxId)}</p>
-  <p><strong>Numero:</strong> ${_escapeHtml(data.invoiceNumber)}</p>
+  <p><strong>Numero:</strong> ${_escapeHtml(data.numSerieFactura)}</p>
   <p><strong>Fecha:</strong> ${_escapeHtml(data.invoiceIssueDate)}</p>
   <p><strong>Importe:</strong> ${_escapeHtml(data.totalAmount)} EUR</p>
   <p>

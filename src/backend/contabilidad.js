@@ -27,7 +27,9 @@ FIXES APLICADOS v5007.8 (heredados):
 */
 
 import wixData from "backend/dataClient";
+
 import { secrets } from "@wix/secrets";
+
 import {
     BUSINESS_COLLECTIONS,
     SDK_CONFIG,
@@ -36,7 +38,7 @@ import {
     TIPO_FACTURA,
     FISCAL_ROLE,
 } from "backend/internalConfig";
-import { SECRETS } from "backend/mmSecrets";
+import { SECRETS, getSecret } from "backend/mmSecrets";
 import { hmacSha256Hex, hashChain } from "backend/securityEngine";
 import { _roundMoney, _cleanText, _safeTrim, makeTraceId } from "public/mmUtils";
 import { logger } from "backend/logger";
@@ -63,7 +65,7 @@ function _readOperationDescription(movement, fallback) {
 }
 
 function _readInvoiceNumber(movement) {
-    return _cleanText(movement?.invoiceNumber || movement?.invoiceNumber, 120) || null;
+    return _cleanText(movement?.numSerieFactura || movement?.numSerieFactura, 120) || null;
 }
 
 function _readTotalAmount(movement) {
@@ -79,7 +81,7 @@ function _readTaxableBase(movement) {
 }
 
 function _readTaxRate(movement) {
-    const value = Number(movement?.taxRate ?? movement?.tipoImpositivo);
+    const value = Number(movement?.tipoImpositivo ?? movement?.tipoImpositivo);
     return Number.isFinite(value) ? value : null;
 }
 
@@ -199,7 +201,7 @@ function _linePayload(line) {
     return [
         line.journalEntryId, line.lineNumber, line.accountCode,
         line.debitAmount, line.creditAmount,
-        line.taxableBaseOrNonSubjectAmount, line.taxRate, line.chargedTaxAmount,
+        line.taxableBaseOrNonSubjectAmount, line.tipoImpositivo, line.chargedTaxAmount,
         line.traceId,
         line.recipientTaxId || "",
         line.irpfWithholdingAmount || 0,
@@ -240,7 +242,7 @@ async function _asAccountingLine(base, number, accountCode, accountName, debit, 
         operationCategory: base.operationCategory,
         lineDescription: base.description,
         taxableBaseOrNonSubjectAmount: tax?.taxableBaseOrNonSubjectAmount ?? null,
-        taxRate: tax?.taxRate ?? null,
+        tipoImpositivo: tax?.tipoImpositivo ?? null,
         chargedTaxAmount: tax?.chargedTaxAmount ?? null,
         externalReference: base.externalReference || null,
         traceId: base.traceId,
@@ -321,14 +323,14 @@ async function _getExisting(journalEntryId) {
         .eq("journalEntryId", journalEntryId)
         .eq("recordType", "ACCOUNTING_LINE")
         .limit(1)
-        .find({ suppressAuth: true, consistentRead: true })
+        .find({ suppressAuth: true, consistencyMode: "strong" })
         .catch(() => null);
     return res?.items?.[0] || null;
 }
 
 async function _insertLineIfMissing(line) {
     const existing = await wixData
-        .get(BUSINESS_COLLECTIONS.LIBRO_ASIENTOS_CONTABLES_DETALLE, line._id, { suppressAuth: true, consistentRead: true })
+        .get(BUSINESS_COLLECTIONS.LIBRO_ASIENTOS_CONTABLES_DETALLE, line._id, { suppressAuth: true, consistencyMode: "strong" })
         .catch(() => null);
 
     if (existing) return { idempotent: true, item: existing };
@@ -363,7 +365,7 @@ function _buildBase(movement) {
         sourceId,
         transactionId: _readTransactionId(movement),
         externalReference: _readInvoiceNumber(movement),
-        invoiceNumber: _readInvoiceNumber(movement),
+        numSerieFactura: _readInvoiceNumber(movement),
         invoiceIssueDate: operationDate,
         fiscalOperationDate: operationDate,
         currency: "EUR",
@@ -421,7 +423,7 @@ async function _buildLines(base, movement, map) {
         throw new Error("ACCOUNTING_PROJECTION_INVALID_AMOUNT");
     }
 
-    const tax = { taxableBaseOrNonSubjectAmount: net, taxRate: tipoImpositivo, chargedTaxAmount: vat || null };
+    const tax = { taxableBaseOrNonSubjectAmount: net, tipoImpositivo: tipoImpositivo, chargedTaxAmount: vat || null };
     const vatCode = _cleanText(map.codigoCuentaIvaRepercutido, 40);
     const vatName = _cleanText(map.nombreCuentaIvaRepercutido, 120);
     const lines = [];

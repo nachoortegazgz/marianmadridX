@@ -26,7 +26,9 @@ FIXES APLICADOS v5009-FISCAL (heredados):
 
 import wixData from "backend/dataClient";
 import { createClient } from "@wix/sdk";
+
 import { secrets } from "@wix/secrets";
+
 
 import {
     makeTraceId,
@@ -58,7 +60,7 @@ import {
     IVA_RATES,
 } from "backend/internalConfig";
 
-import { SECRETS } from "backend/mmSecrets";
+import { SECRETS, getSecret } from "backend/mmSecrets";
 import { logger } from "backend/logger";
 import { normalizeError, _updateCitaSafe } from "backend/booking/bookingCore";
 import { queueFiscalRecovery } from "backend/cajas.web.js";
@@ -222,7 +224,7 @@ function _handleError(error, context, traceId) {
 }
 
 // ============================================================================
-// EXTRACCION FISCAL DEL PEDIDO — nomenclatura V20.1
+// EXTRACCION FISCAL DEL PEDIDO -- nomenclatura V20.1
 // ============================================================================
 
 function _extractFiscalDataFromOrder(order) {
@@ -470,7 +472,7 @@ export async function wixBookingsV2_onBookingConfirmed(rawBody) {
 }
 
 // ============================================================================
-// WEBHOOK: BOOKING CANCELED — RECTIFICATIVA via eventLog
+// WEBHOOK: BOOKING CANCELED -- RECTIFICATIVA via eventLog
 // ============================================================================
 
 export async function wixBookingsV2_onBookingCanceled(rawBody) {
@@ -511,7 +513,7 @@ export async function wixBookingsV2_onBookingCanceled(rawBody) {
                 .eq("linkedBookingIds", bookingId)
                 .eq("movementType", MOVEMENT_TYPE.VENTA_ONLINE)
                 .limit(1)
-                .find({ suppressAuth: true, consistentRead: true })
+                .find({ suppressAuth: true, consistencyMode: "strong" })
                 .catch(() => ({ items: [] }));
 
             const originalMovement = originalMovementRes?.items?.[0];
@@ -534,18 +536,18 @@ export async function wixBookingsV2_onBookingCanceled(rawBody) {
                         taxAmount: -Math.abs(Number(
                             originalMovement.taxAmount ?? 0
                         )),
-                        taxRate: Number(
-                            originalMovement.taxRate ?? 21
+                        tipoImpositivo: Number(
+                            originalMovement.tipoImpositivo ?? 21
                         ),
                         operationDescription: `Rectificacion cancelacion booking ${bookingId}`,
-                        invoiceNumber: originalMovement.invoiceNumber,
+                        numSerieFactura: originalMovement.numSerieFactura,
                         invoiceIssueDate: new Date().toLocaleDateString("sv-SE", {
                             timeZone: SDK_CONFIG?.TZ || "Europe/Madrid",
                         }),
                         invoiceType: TIPO_FACTURA.R1,
                         correctionType: "I",
-                        previousInvoiceId: originalMovement.invoiceNumber || null,
-                        previousInvoiceNumber: originalMovement.invoiceNumber || null,
+                        previousInvoiceId: originalMovement.numSerieFactura || null,
+                        previousInvoiceNumber: originalMovement.numSerieFactura || null,
                         previousInvoiceIssueDate: originalMovement.invoiceIssueDate || null,
                         correctionReason: CORRECTION_REASON.NUMERO_SERIE,
                         issuerTaxId: emisor.issuerTaxId,
@@ -594,7 +596,7 @@ export async function wixBookingsV2_onBookingCanceled(rawBody) {
 }
 
 // ============================================================================
-// WEBHOOK: ORDER PAYMENT STATUS UPDATED — via eventLog
+// WEBHOOK: ORDER PAYMENT STATUS UPDATED -- via eventLog
 // ============================================================================
 
 export async function wixEcom_onOrderPaymentStatusUpdated(rawBody) {
@@ -643,7 +645,7 @@ export async function wixEcom_onOrderPaymentStatusUpdated(rawBody) {
             wixData.query(BUSINESS_COLLECTIONS.MOVIMIENTOS_CAJA)
                 .eq("transactionId", transactionId)
                 .limit(1)
-                .find({ suppressAuth: true, consistentRead: true }),
+                .find({ suppressAuth: true, consistencyMode: "strong" }),
             API_TIMEOUT_MS,
             "checkExistingLedgerPreflight"
         ).catch(() => ({ items: [] }));
@@ -695,7 +697,7 @@ export async function wixEcom_onOrderPaymentStatusUpdated(rawBody) {
         // SSOT v20.1 / auditoria 5.3: fiscalidad online coherente. El importe
         // del ledger es IVA INCLUIDO, por lo que base y cuota se derivan del
         // total con el tipo general (IVA_RATES.GENERAL). Queda erradicado el
-        // patron legacy "taxAmount: 0, taxRate: 21" y la cabecera y el
+        // patron legacy "taxAmount: 0, tipoImpositivo: 21" y la cabecera y el
         // desglose deben usar exactamente los mismos valores.
         const onlineTaxRate = IVA_RATES.GENERAL;
         const onlineTaxableBase =
@@ -721,12 +723,12 @@ export async function wixEcom_onOrderPaymentStatusUpdated(rawBody) {
                     ? fiscalData.withholdingBase
                     : onlineTaxableBase,
                 taxAmount: onlineTaxAmount,
-                taxRate: onlineTaxRate,
+                tipoImpositivo: onlineTaxRate,
                 irpfWithholdingAmount: fiscalData.irpfWithholdingAmount,
                 irpfWithholdingRate: fiscalData.irpfWithholdingRate,
                 withholdingBase: fiscalData.withholdingBase,
                 operationDescription: orderConcept,
-                invoiceNumber: null,
+                numSerieFactura: null,
                 invoiceIssueDate: new Date().toLocaleDateString("sv-SE", {
                     timeZone: SDK_CONFIG?.TZ || "Europe/Madrid",
                 }),
@@ -747,7 +749,7 @@ export async function wixEcom_onOrderPaymentStatusUpdated(rawBody) {
                     taxableBaseOrNonSubjectAmount: fiscalData.withholdingBase > 0
                         ? fiscalData.withholdingBase
                         : onlineTaxableBase,
-                    taxRate: onlineTaxRate,
+                    tipoImpositivo: onlineTaxRate,
                     chargedTaxAmount: onlineTaxAmount,
                     operationDescription: orderConcept,
                     units: 1,
@@ -846,7 +848,7 @@ export async function wixEcom_onOrderPaymentStatusUpdated(rawBody) {
 }
 
 // ============================================================================
-// WEBHOOK: ORDER REFUNDED — via eventLog
+// WEBHOOK: ORDER REFUNDED -- via eventLog
 // ============================================================================
 
 export async function wixEcom_onOrderRefunded(rawBody) {
@@ -884,7 +886,7 @@ export async function wixEcom_onOrderRefunded(rawBody) {
             wixData.query(BUSINESS_COLLECTIONS.MOVIMIENTOS_CAJA)
                 .eq("transactionId", originalTransactionId)
                 .limit(1)
-                .find({ suppressAuth: true, consistentRead: true }),
+                .find({ suppressAuth: true, consistencyMode: "strong" }),
             API_TIMEOUT_MS,
             "queryOriginalMovement"
         ).catch(() => ({ items: [] }));
@@ -986,16 +988,16 @@ export async function wixEcom_onOrderRefunded(rawBody) {
                 taxAmount: -Math.abs(Number(
                     originalMovement.taxAmount ?? 0
                 )),
-                taxRate: Number(
-                    originalMovement.taxRate ?? 21
+                tipoImpositivo: Number(
+                    originalMovement.tipoImpositivo ?? 21
                 ),
                 operationDescription: `Refund - Order ${orderId}`,
-                invoiceNumber: originalMovement.invoiceNumber,
+                numSerieFactura: originalMovement.numSerieFactura,
                 invoiceIssueDate: todayDate,
                 invoiceType: TIPO_FACTURA.R1,
                 correctionType: "I",
-                previousInvoiceId: originalMovement.invoiceNumber || null,
-                previousInvoiceNumber: originalMovement.invoiceNumber || null,
+                previousInvoiceId: originalMovement.numSerieFactura || null,
+                previousInvoiceNumber: originalMovement.numSerieFactura || null,
                 previousInvoiceIssueDate: originalMovement.invoiceIssueDate || null,
                 correctionReason: CORRECTION_REASON.OTRAS,
                 issuerTaxId: emisor.issuerTaxId,
@@ -1011,7 +1013,7 @@ export async function wixEcom_onOrderRefunded(rawBody) {
                     base: -Math.abs(Number(
                         originalMovement.taxableBaseOrNonSubjectAmount ?? 0
                     )),
-                    tipo: Number(originalMovement.taxRate ?? 21),
+                    tipo: Number(originalMovement.tipoImpositivo ?? 21),
                     cuota: -Math.abs(Number(
                         originalMovement.taxAmount ?? 0
                     )),
@@ -1059,7 +1061,7 @@ export async function wixEcom_onOrderRefunded(rawBody) {
                 .eq("orderId", orderId)
                 .eq("movementType", MOVEMENT_TYPE.REEMBOLSO)
                 .limit(100)
-                .find({ suppressAuth: true, consistentRead: true }),
+                .find({ suppressAuth: true, consistencyMode: "strong" }),
             API_TIMEOUT_MS,
             "queryRefundsForOrder"
         );

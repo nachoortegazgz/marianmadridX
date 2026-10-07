@@ -6,6 +6,8 @@ RESPONSIBILITY: Asistente operativo privado de Marian.
 =============================================================================
 */
 import { webMethod, Permissions } from "wix-web-module";
+import { SECRETS, getSecret } from "backend/mmSecrets";
+
 import { secrets } from "@wix/secrets";
 import { SECRETS } from "backend/mmSecrets";
 import { requireMarianManager } from "backend/security";

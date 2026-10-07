@@ -11,6 +11,8 @@ CORRECTIONS: C-01 (sin active), C-03/C-04 (memberId), BUG-04 FIX (campos
 
 import wixData from "backend/dataClient";
 import { webMethod, Permissions } from "wix-web-module";
+import wixData from "backend/dataClient";
+import { currentMember } from "@wix/members";
 import { members } from "@wix/members";
 
 import {
@@ -32,6 +34,10 @@ import {
     findStaffByMemberId,
     getStaffDisplayName,
 } from "backend/staff";
+
+import { logger } from "backend/logger";
+import { hmacSha256Hex } from "backend/securityEngine";
+import { SECRETS, getSecret } from "backend/mmSecrets";
 
 import { requireAdmin } from "backend/security";
 import { signTimeclockRecord } from "backend/securityEngine";
