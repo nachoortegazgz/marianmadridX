@@ -1,29 +1,21 @@
 /*
 =============================================================================
 MODULE: backend/citasManager.web.js
-VERSION: v5009-FISCAL-V20.1
+VERSION: v5009-FISCAL-V20.1-SDKv2
 BASE: v5008.6-FINAL + Directriz V20 (IDs nativa en ingles)
 RESPONSIBILITY: Booking processing, payment confirmation and rescheduling.
 STANDARDS: G10 ASCII Strict.
 
-FIXES APLICADOS v5009-FISCAL-V20.1:
-  - V20-01: imports alineados (BOOKING_STATUS, PAYMENT_STATUS, PAYMENT_METHOD).
-  - V20-02: registerBookingPayment recibe movementType (no movementType).
-  - V20-03: helper _setCitasPaymentState escribe BOOKING_STATUS.CONFIRMED.
-
-FIXES APLICADOS v5008.6 (heredados):
-  - FIX-27: eliminado import no usado rescheduleBookingElevated.
-
-NOTA DE AUDITORIA: el modulo original expone 2 webMethods
-(processDualBooking, confirmPayment). Los helpers de reschedule existen
-pero no estan expuestos como webMethods en este archivo. Se preservan tal
-cual. No se anaden webMethods nuevos.
+FIXES APLICADOS SDK v2:
+  - Elevación explícita de orders.getOrder usando auth.elevate para 
+    garantizar la lectura de órdenes de eCommerce en el backend.
 =============================================================================
 */
 
 import { webMethod, Permissions } from "wix-web-module";
 import wixData from "backend/dataClient";
 import { orders } from "@wix/ecom";
+import { auth } from "@wix/essentials";
 
 import {
   BUSINESS_COLLECTIONS,
@@ -82,6 +74,9 @@ const MINUTOS_MAX_HUECO_DUAL = Math.max(
   0,
   Number(SLOT_SEARCH?.MINUTOS_MAX_HUECO_DUAL) || 120
 );
+
+// Elevación explícita para lectura de órdenes
+const getOrderElevated = auth.elevate(orders.getOrder);
 
 // =============================================================================
 // HELPERS INTERNOS
@@ -408,8 +403,6 @@ export const confirmPayment = webMethod(
         };
       }
 
-      // SSOT v20.1: una cita no puede marcarse como pagada sin referencia al
-      // movimiento fiscal append-only que la respalda.
       const cashMovementId =
         ledgerResult?.data?.cabeceraId ||
         ledgerResult?.data?._id ||
@@ -522,7 +515,7 @@ async function _getValidatedPaidOrder(
 
   try {
     order = await withTimeout(
-      orders.getOrder(normalizedOrderId),
+      getOrderElevated(normalizedOrderId),
       API_TIMEOUT_MS,
       "getOrder"
     );
@@ -698,10 +691,8 @@ async function _setCitasPaymentState(
 
         return {
           ...currentCita,
-          // ADR-06: campo canonico bookingStatus (no 'status')
           bookingStatus: BOOKING_STATUS.CONFIRMED,
           paymentStatus: paymentState,
-          // SSOT v20.1: trazabilidad fiscal en el nivel canonico del documento
           cashMovementId: cashMovementId || null,
           orderId: orderId || null,
           traceId,
