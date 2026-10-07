@@ -128,6 +128,12 @@ fisica (barrido completo de src/, package.json y wix.lock) y ampliada con
 el analisis tecnico de impacto en ADR-07 (`docs/adr/ADR-07-catalog-v3-analysis.md`):
 superficie Stores real = cero codigo propio; decision NO MIGRAR confirmada.
 
+SUPERSEDIDO 2026-10-07: por autorizacion expresa del propietario, la decision
+de mantener Catalog V1 queda reemplazada como objetivo futuro por ADR-12
+(`docs/adr/ADR-12-catalog-v3-owner-authorization.md`). El estado comprobado
+del sitio sigue siendo V1; la aprobacion de V3 no significa que el catalogo
+del sitio o sus datos ya hayan sido migrados.
+
 ## Consecuencias
 
 - Riesgo bajo: todas las modificaciones de Etapa A son sintaxis/contrato o
