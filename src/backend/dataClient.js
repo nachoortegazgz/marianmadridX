@@ -219,7 +219,3 @@ export { query, get, insert, update, save, remove };
 const wixDataCompat = { query, get, insert, update, save, remove };
 export default wixDataCompat;
 
-import { items } from "@wix/data";
-
-export default items;
-

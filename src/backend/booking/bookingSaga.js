@@ -47,7 +47,7 @@ NOTA CONTRACTUAL (BIBLIA 2.2.1):
 */
 
 import { bookings } from "@wix/bookings";
-import { elevate } from "@wix/sdk";
+import { auth } from "@wix/essentials";
 // EXCEPCION DATA API (APENDICE C de la BIBLIA): persistencia CMS server-side
 // con suppressAuth/suppressHooks; ver apendice antes de proponer migracion.
 import wixData from "backend/dataClient";
@@ -420,7 +420,7 @@ async function _createBookingWithSelectiveElevation(booking, options, traceId) {
         if (!isAccessDenied) throw err;
         log.info("Elevating createBooking due to ACCESS_DENIED", { traceId: traceId });
         return await withTimeout(
-            () => elevate(bookings.createBooking)(booking, options),
+            () => auth.elevate(bookings.createBooking)(booking, options),
             BOOKING_CREATION_TIMEOUT_MS,
             "createBooking:elevated"
         );
