@@ -1,434 +1,419 @@
 /*
 =============================================================================
 MODULE: backend/staff.js
-VERSION: v8.1-SSOT-MASTER
-BASE: BIBLIA v8.0-SSOT-MASTER + ANEXO SSOT v8.1
-RESPONSIBILITY: Cache LRU de staff + resolucion de identidad por
-                memberId/resourceId/email. DTO publico whitelist.
-STANDARDS: G10 ASCII Strict.
-
-CORRECTIONS APPLIED (ANEXO v8.1):
-  - C-01: campo 'active' eliminado del cache y del DTO
-  - C-02: staffRole → rolBookings + rolWebsite
-  - C-03: staffMemberId → memberId
-  - SSOT-13: resourceId y memberId inmutables
-  - Whitelist DTO publico (sin notes, sin thirdPartyId, sin traceId)
+VERSION: v9.0-SDKV2-ZERO-LEGACY
+ENTREGA: 4/9 (migracion dominio reservas online -> Wix SDK v2)
+BASE: BIBLIA SSOT-MASTER v7/v8 + ANEXO SSOT v8.1 (C-02/C-03) + SSOT CMS
+      (repo marianmadridX, rama main, commit b7effa3d)
+RESPONSIBILITY: Resolucion de identidad de staff para el dominio de
+  reservas: resourceId (Bookings) <-> memberId (Members) <-> roles
+  (rolBookings/rolWebsite), con cache RAM acotada y DTO publico minimizado.
+STANDARDS: G10 ASCII estricto. Sin console.log (logger SSOT). Sin secretos.
+MIGRACION SDK v2:
+  - Unico acceso a datos via backend/dataAccess.js (DAL elevado, items SDK v2).
+  - Cero wix-data legacy, cero suppressAuth, cero suppressHooks.
+  - Filtros WQL por objeto (constructores wql.*), orden por order.*.
+CERO LEGACY / CERO ALIAS:
+  - memberId es el unico vinculo con Members (ANEXO C-03). 'staffMemberId'
+    no existe en este modulo.
+  - Roles separados rolBookings/rolWebsite (ANEXO C-02). 'staffRole' no existe.
+  - Sin campo 'active' (ANEXO C-01): la operacionalidad se deriva de
+    rolWebsite dentro de STAFF_ACCESS.ALLOWED_ROLES.
+RGPD:
+  - El DTO publico es whitelist estricta. Nunca salen: notes, thirdPartyId,
+    traceId, location, _id, _owner, email completo fuera del backend.
+DEPENDENCIAS: backend/dataAccess.js, backend/internalConfig.js,
+  backend/validation.js, backend/logger.js.
 =============================================================================
 */
 
-import wixData from "backend/dataClient";
-
 import {
-    BUSINESS_COLLECTIONS,
-    SDK_CONFIG,
-    ROL_BOOKINGS,
-    ROL_WEBSITE,
-    MAPA_STAFF_FIELDS,
-    STAFF_ACCESS,
+  queryFirstItem,
+  queryAllPages,
+  wql,
+  order,
+  CONSISTENCY,
+} from "backend/dataAccess";
+import {
+  BUSINESS_COLLECTIONS,
+  MAPA_STAFF_FIELDS,
+  STAFF,
+  STAFF_ACCESS,
+  STAFF_DEFAULT_NAME,
+  SDK_CONFIG,
+  isValidGuid,
 } from "backend/internalConfig";
-
 import { assertMapaStaff } from "backend/validation";
 import { logger } from "backend/logger";
 
 const log = logger;
+const F = MAPA_STAFF_FIELDS;
+const COLLECTION = BUSINESS_COLLECTIONS.MAPA_STAFF;
 
 // =============================================================================
-// BLOQUE 1 - CONSTANTES Y CACHE LRU
+// BLOQUE 1 - CACHE RAM ACOTADA (TTL + LRU por expiracion)
 // =============================================================================
 
-const CACHE_TTL_MS = Number(SDK_CONFIG?.CACHE?.STAFF_TTL_MS) || 300000;
-const CACHE_MAX_ENTRIES = Number(SDK_CONFIG?.CACHE?.MAX_ENTRIES) || 100;
+const STAFF_TTL_MS = SDK_CONFIG.CACHE.STAFF_TTL_MS;
+const MAX_CACHE_ENTRIES = SDK_CONFIG.CACHE.MAX_ENTRIES;
 
-const STAFF_CACHE = new Map();
-
-// Whitelist de campos exponibles en DTO publico (RGPD minimizacion)
-const PUBLIC_DTO_FIELDS = Object.freeze([
-    "resourceId",
-    "memberId",
-    "displayName",
-    "staffName",
-    "rolBookings",
-    "rolWebsite",
-    "scheduleId",
-    "locationId",
-    "location",
-    "email",
-    "phone",
-]);
-
-// =============================================================================
-// BLOQUE 2 - HELPERS INTERNOS
-// =============================================================================
-
-function _normalizeText(value) {
-    if (value === null || value === undefined) return "";
-    return String(value).trim();
-}
-
-function _normalizeEmail(value) {
-    return _normalizeText(value).toLowerCase();
-}
-
-function _isValidGuid(value) {
-    return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
-        _normalizeText(value)
-    );
-}
+/** @type {Map<string, {value: *, expiresAt: number}>} */
+const cache = new Map();
 
 function _cacheGet(key) {
-    const entry = STAFF_CACHE.get(key);
-    if (!entry) return null;
-    if (Date.now() - entry.timestamp > CACHE_TTL_MS) {
-        STAFF_CACHE.delete(key);
-        return null;
-    }
-    // LRU: reinsertar al final
-    STAFF_CACHE.delete(key);
-    STAFF_CACHE.set(key, entry);
-    return entry.value;
+  const entry = cache.get(key);
+  if (!entry) return undefined;
+  if (entry.expiresAt <= Date.now()) {
+    cache.delete(key);
+    return undefined;
+  }
+  return entry.value;
 }
 
 function _cacheSet(key, value) {
-    if (STAFF_CACHE.size >= CACHE_MAX_ENTRIES) {
-        const oldestKey = STAFF_CACHE.keys().next().value;
-        if (oldestKey) STAFF_CACHE.delete(oldestKey);
+  if (cache.size >= MAX_CACHE_ENTRIES) {
+    let oldestKey = null;
+    let oldestExpiry = Infinity;
+    for (const [entryKey, entry] of cache) {
+      if (entry.expiresAt < oldestExpiry) {
+        oldestExpiry = entry.expiresAt;
+        oldestKey = entryKey;
+      }
     }
-    STAFF_CACHE.set(key, { value, timestamp: Date.now() });
+    if (oldestKey !== null) cache.delete(oldestKey);
+  }
+  cache.set(key, { value, expiresAt: Date.now() + STAFF_TTL_MS });
 }
 
-export function invalidateStaffCache() {
-    STAFF_CACHE.clear();
+/**
+ * Invalidacion explicita (SSOT-11): tras cualquier alta/baja/modificacion en
+ * MapaStaff el escritor debe llamar a invalidateStaffCache(resourceId o
+ * memberId). Sin argumento, limpia la cache completa.
+ */
+export function invalidateStaffCache(identifier) {
+  const id = String(identifier === null || identifier === undefined ? "" : identifier).trim();
+  if (!id) {
+    cache.clear();
+    return;
+  }
+  cache.delete(`rid:${id}`);
+  cache.delete(`mid:${id}`);
+  cache.delete("list:operational");
 }
 
 // =============================================================================
-// BLOQUE 3 - CREACION DE REGISTRO DE STAFF (C-01/C-02/C-03)
+// BLOQUE 2 - DTO PUBLICO (whitelist RGPD, minimizacion de datos)
 // =============================================================================
 
-function _createStaffRecord(item) {
-    if (!item || typeof item !== "object") return null;
-
-    return {
-        _id: _normalizeText(item._id),
-        resourceId: _normalizeText(item.resourceId),
-        memberId: _normalizeText(item.memberId), // C-03
-        rolBookings: _normalizeText(item.rolBookings).toUpperCase(), // C-02
-        rolWebsite: _normalizeText(item.rolWebsite).toUpperCase(), // C-02
-        staffName: _normalizeText(item.staffName),
-        displayName: _normalizeText(item.displayName),
-        thirdPartyId: _normalizeText(item.thirdPartyId),
-        email: _normalizeEmail(item.email),
-        phone: _normalizeText(item.phone),
-        scheduleId: _normalizeText(item.scheduleId),
-        locationId: _normalizeText(item.locationId),
-        location: _normalizeText(item.location),
-        notes: _normalizeText(item.notes),
-        traceId: _normalizeText(item.traceId),
-        // C-01: campo 'active' NO se copia al registro interno
-    };
-}
+const PUBLIC_DTO_FIELDS = Object.freeze([
+  F.RESOURCE_ID,
+  F.MEMBER_ID,
+  F.STAFF_NAME,
+  F.DISPLAY_NAME,
+  F.EMAIL,
+  F.PHONE,
+  F.ROL_BOOKINGS,
+  F.ROL_WEBSITE,
+  F.SCHEDULE_ID,
+]);
 
 function _buildPublicDTO(record) {
-    if (!record) return null;
-    const dto = {};
-    for (const field of PUBLIC_DTO_FIELDS) {
-        if (record[field] !== undefined && record[field] !== "") {
-            dto[field] = record[field];
-        }
+  if (!record || typeof record !== "object") return null;
+  const dto = {};
+  for (const field of PUBLIC_DTO_FIELDS) {
+    const value = record[field];
+    if (value !== undefined && value !== null && value !== "") {
+      dto[field] = value;
     }
-    // C-01: nunca exponer 'active'
-    // RGPD: nunca exponer 'notes', 'thirdPartyId', 'traceId'
-    return dto;
+  }
+  return dto;
 }
 
 // =============================================================================
-// BLOQUE 4 - CARGA COMPLETA DEL CATALOGO
+// BLOQUE 3 - FALLBACK HARDCODED SEGURO (solo display, nunca identidad)
+// La lista dura STAFF.IDS es red de seguridad de DISPLAY: no inventa memberId,
+// por lo que un fallback NUNCA satisface resolveStaffForBooking.
 // =============================================================================
 
-async function _loadAllStaff(traceId) {
-    const cacheKey = "__ALL__";
-    const cached = _cacheGet(cacheKey);
-    if (cached) return cached;
-
-    try {
-        const catalog = _emptyCatalog();
-        const result = await wixData
-            .query(BUSINESS_COLLECTIONS.MAPA_STAFF)
-            .limit(1000)
-            .find({ suppressAuth: true });
-
-        for (const item of result?.items || []) {
-            const record = _createStaffRecord(item);
-            if (!record) continue;
-            if (!record._id && !record.resourceId && !record.email) continue;
-
-            catalog.all.push(record);
-            _addToIndex(catalog.byResourceId, record.resourceId, record);
-            _addToIndex(catalog.byMemberId, record.memberId, record); // C-03
-            _addToIndex(catalog.byEmail, record.email, record);
-            _addToIndex(catalog.byScheduleId, record.scheduleId, record);
-            _addToIndex(catalog.byId, record._id, record);
-        }
-
-        _cacheSet(cacheKey, catalog);
-        return catalog;
-    } catch (error) {
-        log.error("Failed to load staff catalog", {
-            traceId,
-            message: error?.message || String(error),
-        });
-        return _emptyCatalog();
-    }
-}
-
-function _emptyCatalog() {
-    return {
-        all: [],
-        byResourceId: new Map(),
-        byMemberId: new Map(), // C-03
-        byEmail: new Map(),
-        byScheduleId: new Map(),
-        byId: new Map(),
-    };
-}
-
-function _addToIndex(index, key, record) {
-    if (!key) return;
-    if (!index.has(key)) index.set(key, []);
-    index.get(key).push(record);
+function _fallbackDisplayDto(resourceId) {
+  const rid = String(resourceId === null || resourceId === undefined ? "" : resourceId).trim();
+  if (!STAFF.IDS.includes(rid)) return null;
+  const display = STAFF.RESOURCE_TO_DISPLAY[rid];
+  if (!display) return null;
+  return {
+    resourceId: rid,
+    staffName: display,
+    displayName: display,
+    memberId: null,
+  };
 }
 
 // =============================================================================
-// BLOQUE 5 - RESOLUCION DE STAFF (API PUBLICA)
+// BLOQUE 4 - RESOLUCION POR resourceId (Bookings) Y memberId (Members)
 // =============================================================================
+
+function _consistencyOf(options) {
+  return options && options.consistency === CONSISTENCY.STRONG
+    ? CONSISTENCY.STRONG
+    : CONSISTENCY.EVENTUAL;
+}
 
 /**
- * Resuelve staff por resourceId, memberId o email.
- * C-03: prioridad memberId > resourceId > email.
- * @param {string} identifier - GUID o email.
- * @param {string} [traceId]
- * @returns {Promise<Object|null>} DTO publico o null.
+ * Obtiene el DTO publico de un staff por su resourceId de Bookings.
+ * @param {string} resourceId GUID del resource en Bookings
+ * @param {{traceId?: string, consistency?: string}} [options]
+ * @returns {Promise<Object|null>} DTO publico, fallback display, o null.
  */
-export async function findStaff(identifier, traceId = null) {
-    const id = _normalizeText(identifier);
-    if (!id) return null;
+export async function getStaffByResourceId(resourceId, options = {}) {
+  const rid = String(resourceId === null || resourceId === undefined ? "" : resourceId).trim();
+  if (!isValidGuid(rid)) return null;
 
-    const cacheKey = `find:${id.toLowerCase()}`;
-    const cached = _cacheGet(cacheKey);
-    if (cached !== null) return cached;
+  const cacheKey = `rid:${rid}`;
+  const cached = _cacheGet(cacheKey);
+  if (cached !== undefined) return cached;
 
-    const catalog = await _loadAllStaff(traceId);
-    let record = null;
+  const record = await queryFirstItem({
+    dataCollectionId: COLLECTION,
+    filter: wql.eq(F.RESOURCE_ID, rid),
+    consistency: _consistencyOf(options),
+  });
 
-    if (_isValidGuid(id)) {
-        // C-03: intentar por memberId primero
-        const byMemberId = catalog.byMemberId.get(id);
-        if (byMemberId && byMemberId.length > 0) record = byMemberId[0];
-
-        if (!record) {
-            const byResourceId = catalog.byResourceId.get(id);
-            if (byResourceId && byResourceId.length > 0) record = byResourceId[0];
+  let dto = null;
+  if (record) {
+    try {
+      assertMapaStaff(record);
+      dto = _buildPublicDTO(record);
+    } catch (error) {
+      log.error(
+        "STAFF_SCHEMA_VIOLATION: registro MapaStaff invalido en lectura; se descarta",
+        {
+          resourceId: rid,
+          message: String((error && error.message) || error || ""),
+          traceId: options.traceId || null,
         }
-
-        if (!record) {
-            const byId = catalog.byId.get(id);
-            if (byId && byId.length > 0) record = byId[0];
-        }
+      );
+      dto = null;
     }
+  }
 
-    if (!record) {
-        const byEmail = catalog.byEmail.get(id.toLowerCase());
-        if (byEmail && byEmail.length > 0) record = byEmail[0];
-    }
-
-    const dto = _buildPublicDTO(record);
-    _cacheSet(cacheKey, dto);
-    return dto;
+  if (!dto) dto = _fallbackDisplayDto(rid);
+  _cacheSet(cacheKey, dto);
+  return dto;
 }
 
 /**
- * Resuelve staff por resourceId (GUID Bookings).
- * @param {string} resourceId
- * @param {string} [traceId]
+ * Obtiene el DTO publico de un staff por su memberId de Members (ANEXO C-03).
+ * @param {string} memberId GUID del miembro
+ * @param {{traceId?: string, consistency?: string}} [options]
  * @returns {Promise<Object|null>}
  */
-export async function findStaffByResourceId(resourceId, traceId = null) {
-    const id = _normalizeText(resourceId);
-    if (!_isValidGuid(id)) return null;
+export async function getStaffByMemberId(memberId, options = {}) {
+  const mid = String(memberId === null || memberId === undefined ? "" : memberId).trim();
+  if (!isValidGuid(mid)) return null;
 
-    const cacheKey = `rid:${id}`;
-    const cached = _cacheGet(cacheKey);
-    if (cached !== null) return cached;
+  const cacheKey = `mid:${mid}`;
+  const cached = _cacheGet(cacheKey);
+  if (cached !== undefined) return cached;
 
-    const catalog = await _loadAllStaff(traceId);
-    const matches = catalog.byResourceId.get(id) || [];
-    const dto = matches.length > 0 ? _buildPublicDTO(matches[0]) : null;
+  const record = await queryFirstItem({
+    dataCollectionId: COLLECTION,
+    filter: wql.eq(F.MEMBER_ID, mid),
+    consistency: _consistencyOf(options),
+  });
 
-    _cacheSet(cacheKey, dto);
-    return dto;
-}
-
-/**
- * Resuelve staff por memberId (GUID Wix Members).
- * C-03: campo canonico.
- * @param {string} memberId
- * @param {string} [traceId]
- * @returns {Promise<Object|null>}
- */
-export async function findStaffByMemberId(memberId, traceId = null) {
-    const id = _normalizeText(memberId);
-    if (!_isValidGuid(id)) return null;
-
-    const cacheKey = `mid:${id}`;
-    const cached = _cacheGet(cacheKey);
-    if (cached !== null) return cached;
-
-    const catalog = await _loadAllStaff(traceId);
-    const matches = catalog.byMemberId.get(id) || [];
-    const dto = matches.length > 0 ? _buildPublicDTO(matches[0]) : null;
-
-    _cacheSet(cacheKey, dto);
-    return dto;
-}
-
-/**
- * Resuelve el scheduleId Bookings asociado a un resourceId canonico.
- * @param {string} resourceId
- * @param {string} [traceId]
- * @returns {Promise<string|null>}
- */
-export async function getStaffScheduleId(resourceId, traceId = null) {
-    const staff = await findStaffByResourceId(resourceId, traceId);
-    return staff ? _normalizeText(staff.scheduleId) || null : null;
-}
-
-/**
- * Lista todo el staff (DTO publico).
- * @param {string} [traceId]
- * @returns {Promise<Array<Object>>}
- */
-export async function listStaff(traceId = null) {
-    const catalog = await _loadAllStaff(traceId);
-    return catalog.all.map(_buildPublicDTO).filter(Boolean);
-}
-
-/**
- * Lista staff filtrado por rolWebsite.
- * C-02: rol interno de negocio.
- * @param {string} rolWebsite - ADMIN | GESTION | ESTILISTA
- * @param {string} [traceId]
- * @returns {Promise<Array<Object>>}
- */
-export async function listStaffByRolWebsite(rolWebsite, traceId = null) {
-    const rol = _normalizeText(rolWebsite).toUpperCase();
-    if (!Object.values(ROL_WEBSITE).includes(rol)) return [];
-
-    const catalog = await _loadAllStaff(traceId);
-    return catalog.all
-        .filter((r) => r.rolWebsite === rol)
-        .map(_buildPublicDTO)
-        .filter(Boolean);
-}
-
-/**
- * Lista staff filtrado por rolBookings.
- * C-02: rol oficial Wix Bookings.
- * @param {string} rolBookings - OWNER | ADMIN | RECEPTIONIST | STAFF
- * @param {string} [traceId]
- * @returns {Promise<Array<Object>>}
- */
-export async function listStaffByRolBookings(rolBookings, traceId = null) {
-    const rol = _normalizeText(rolBookings).toUpperCase();
-    if (!Object.values(ROL_BOOKINGS).includes(rol)) return [];
-
-    const catalog = await _loadAllStaff(traceId);
-    return catalog.all
-        .filter((r) => r.rolBookings === rol)
-        .map(_buildPublicDTO)
-        .filter(Boolean);
-}
-
-/**
- * Lista staff asignable a un servicio (por availableStaff Multi Reference).
- * C-05: resolución mediante queryReferencedItems del SDK Data v2.
- * @param {string} serviceId - GUID ServiciosCatalogo.serviceId
- * @param {string} [traceId]
- * @returns {Promise<Array<Object>>}
- */
-export async function listStaffForService(serviceId, traceId = null) {
-    const id = _normalizeText(serviceId);
-    if (!_isValidGuid(id)) return [];
-
-    const cacheKey = `svc:${id}`;
-    const cached = _cacheGet(cacheKey);
-    if (cached !== null) return cached;
-
+  let dto = null;
+  if (record) {
     try {
-        const refs = await wixData.queryReferencedItems(
-            BUSINESS_COLLECTIONS.SERVICIOS_CATALOGO,
-            id,
-            "availableStaff",
-            { consistentRead: true }
-        );
-
-        const staffIds = (refs?.items || []).map((ref) => ref._id || ref.id);
-        const all = await listStaff(traceId);
-        const filtered = all.filter((s) =>
-            staffIds.includes(s.resourceId) || staffIds.includes(s._id)
-        );
-
-        _cacheSet(cacheKey, filtered);
-        return filtered;
+      assertMapaStaff(record);
+      dto = _buildPublicDTO(record);
     } catch (error) {
-        log.error("listStaffForService failed", {
-            traceId,
-            serviceId: id,
-            message: error?.message || String(error),
-        });
-        return [];
+      log.error(
+        "STAFF_SCHEMA_VIOLATION: registro MapaStaff invalido en lectura; se descarta",
+        {
+          memberId: mid,
+          message: String((error && error.message) || error || ""),
+          traceId: options.traceId || null,
+        }
+      );
+      dto = null;
     }
-}
+  }
 
-// =============================================================================
-// BLOQUE 6 - VALIDACION DE STAFF (para hooks y webMethods)
-// =============================================================================
-
-/**
- * Valida que un item de MapaStaff cumple el schema v8.1.
- * Delega en assertMapaStaff (validation.js).
- * @param {Object} item
- * @returns {boolean}
- */
-export function validateStaffRecord(item) {
-    try {
-        assertMapaStaff(item);
-        return true;
-    } catch (error) {
-        log.warn("Staff record validation failed", {
-            message: error?.message || String(error),
-        });
-        return false;
-    }
+  _cacheSet(cacheKey, dto);
+  return dto;
 }
 
 /**
- * Verifica si un resourceId pertenece a Marian (manager).
- * @param {string} resourceId
- * @returns {boolean}
+ * Resolucion por email (vinculacion Members -> MapaStaff).
+ * Compara en minusculas: el email canonico se almacena en minusculas.
  */
-export function isMarianResource(resourceId) {
-    return _normalizeText(resourceId) === STAFF_ACCESS.MARIAN_RESOURCE_ID;
-}
+export async function getStaffByEmail(email, options = {}) {
+  const raw = String(email === null || email === undefined ? "" : email).trim();
+  if (!raw) return null;
+  const lower = raw.toLowerCase();
 
-/**
- * Obtiene el nombre visible de un staff (fallback a STAFF_DEFAULT_NAME).
- * @param {Object} staff - DTO publico.
- * @returns {string}
- */
-export function getStaffDisplayName(staff) {
-    if (!staff) return "Profesional";
-    return (
-        _normalizeText(staff.displayName) ||
-        _normalizeText(staff.staffName) ||
-        "Profesional"
+  const record = await queryFirstItem({
+    dataCollectionId: COLLECTION,
+    filter: wql.or(wql.eq(F.EMAIL, raw), wql.eq(F.EMAIL, lower)),
+    consistency: _consistencyOf(options),
+  });
+
+  if (!record) return null;
+  try {
+    assertMapaStaff(record);
+  } catch (error) {
+    log.error(
+      "STAFF_SCHEMA_VIOLATION: registro MapaStaff invalido en resolucion por email",
+      {
+        message: String((error && error.message) || error || ""),
+        traceId: options.traceId || null,
+      }
     );
+    return null;
+  }
+  return _buildPublicDTO(record);
+}
+
+// =============================================================================
+// BLOQUE 5 - LISTADO OPERACIONAL (sustituye al filtro legacy por 'active')
+// =============================================================================
+
+/**
+ * Un staff esta operativo cuando su rolWebsite pertenece a
+ * STAFF_ACCESS.ALLOWED_ROLES (ANEXO C-01: la operacionalidad NO vive en un
+ * campo booleano 'active', vive en el rol canonico).
+ */
+export function isOperationalWebsiteRole(rolWebsite) {
+  return STAFF_ACCESS.ALLOWED_ROLES.includes(rolWebsite);
+}
+
+/**
+ * Lista el staff operativo para el canal website (agenda publica y panel).
+ * Registros invalidos se descartan con error en logger (nunca rompen la lista).
+ * @param {{traceId?: string}} [options]
+ * @returns {Promise<Array<Object>>} DTOs publicos ordenados por staffName.
+ */
+export async function listOperationalStaff(options = {}) {
+  const cacheKey = "list:operational";
+  const cached = _cacheGet(cacheKey);
+  if (cached !== undefined) return cached;
+
+  const records = await queryAllPages({
+    dataCollectionId: COLLECTION,
+    filter: wql.in(F.ROL_WEBSITE, STAFF_ACCESS.ALLOWED_ROLES),
+    sort: order.asc(F.STAFF_NAME),
+    pageSize: 100,
+    maxPages: 5,
+    traceId: options.traceId || null,
+  });
+
+  const list = [];
+  for (const record of records) {
+    try {
+      assertMapaStaff(record);
+      const dto = _buildPublicDTO(record);
+      if (dto) list.push(dto);
+    } catch (error) {
+      log.error(
+        "STAFF_SCHEMA_VIOLATION: registro MapaStaff invalido; excluido del listado operativo",
+        {
+          resourceId: String((record && record.resourceId) || "UNKNOWN"),
+          message: String((error && error.message) || error || ""),
+          traceId: options.traceId || null,
+        }
+      );
+    }
+  }
+
+  // Red de seguridad de DISPLAY: recursos hardcodeados ausentes del CMS.
+  const knownResourceIds = new Set(
+    list.map((dto) => String(dto.resourceId || "")).filter(Boolean)
+  );
+  for (const rid of STAFF.IDS) {
+    if (!knownResourceIds.has(rid)) {
+      const fallback = _fallbackDisplayDto(rid);
+      if (fallback) list.push(fallback);
+    }
+  }
+
+  list.sort((a, b) =>
+    String(a.staffName || "").localeCompare(String(b.staffName || ""))
+  );
+
+  _cacheSet(cacheKey, list);
+  return list;
+}
+
+// =============================================================================
+// BLOQUE 6 - RESOLUCION PARA CREACION DE RESERVAS (ruta critica)
+// =============================================================================
+
+function _staffError(code, message) {
+  const error = new Error(message);
+  error.code = code;
+  return error;
+}
+
+/**
+ * Resuelve la identidad completa requerida para crear/confirmar bookings:
+ * resourceId + memberId (ANEXO C-03) + nombre + rol de Bookings + scheduleId.
+ * Falla de forma explicita (fail-fast) si el recurso no existe o carece de
+ * memberId: el fallback hardcoded es solo display y NUNCA valida aqui.
+ *
+ * @param {string} resourceId GUID del resource de Bookings
+ * @param {{traceId?: string, consistency?: string}} [options]
+ * @returns {Promise<Readonly<{resourceId: string, memberId: string,
+ *   staffName: string|null, rolBookings: string|null, scheduleId: string|null}>>}
+ * @throws {Error} code=STAFF_UNRESOLVED | STAFF_MEMBER_ID_MISSING
+ */
+export async function resolveStaffForBooking(resourceId, options = {}) {
+  const dto = await getStaffByResourceId(resourceId, options);
+  if (!dto) {
+    throw _staffError(
+      "STAFF_UNRESOLVED",
+      `STAFF_UNRESOLVED: resourceId no resuelto en MapaStaff (traceId=${String(options.traceId || "null")})`
+    );
+  }
+  if (!isValidGuid(String(dto.memberId || ""))) {
+    throw _staffError(
+      "STAFF_MEMBER_ID_MISSING",
+      `STAFF_MEMBER_ID_MISSING: MapaStaff.memberId es obligatorio para operar (ANEXO C-03, resourceId=${dto.resourceId})`
+    );
+  }
+  return Object.freeze({
+    resourceId: dto.resourceId,
+    memberId: dto.memberId,
+    staffName: dto.staffName || dto.displayName || null,
+    rolBookings: dto.rolBookings || null,
+    scheduleId: dto.scheduleId || null,
+  });
+}
+
+/**
+ * Nombre visible para DTOs de reservas (agenda, confirmaciones, emails).
+ * Nunca lanza: devuelve STAFF_DEFAULT_NAME si no hay resolucion.
+ */
+export async function getStaffDisplayName(resourceId, options = {}) {
+  try {
+    const dto = await getStaffByResourceId(resourceId, options);
+    if (dto && (dto.staffName || dto.displayName)) {
+      return String(dto.displayName || dto.staffName);
+    }
+  } catch (error) {
+    log.warn("getStaffDisplayName: fallo no critico, se usa nombre por defecto", {
+      resourceId: String(resourceId || ""),
+      message: String((error && error.message) || error || ""),
+    });
+  }
+  return STAFF_DEFAULT_NAME;
+}
+
+/**
+ * Comprueba si un miembro (memberId) es staff operativo del canal website.
+ * Usado por el panel de gestion antes de exponer acciones privilegiadas.
+ */
+export async function isOperationalMember(memberId, options = {}) {
+  const dto = await getStaffByMemberId(memberId, options);
+  if (!dto) return false;
+  return isOperationalWebsiteRole(dto.rolWebsite);
 }
