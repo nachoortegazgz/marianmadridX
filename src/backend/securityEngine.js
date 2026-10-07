@@ -16,7 +16,7 @@ CORRECTIONS APPLIED (ANEXO v8.1):
 =============================================================================
 */
 
-import { getSecret } from "wix-secrets-backend";
+import { secrets } from "@wix/secrets";
 import { SECRETS } from "backend/mmSecrets";
 import { JWT, INTEGRITY } from "backend/internalConfig";
 import { logger } from "backend/logger";
@@ -261,7 +261,7 @@ export async function signTimeclockRecord(record) {
         throw new Error("SIGN_INPUT_INVALID: record must be an object");
     }
 
-    const secret = await getSecret(SECRETS.AUTH_JWT_KEY);
+    const secret = await secrets.getSecretValue(SECRETS.AUTH_JWT_KEY);
     if (!secret) throw new Error("AUTH_JWT_KEY_NOT_FOUND");
 
     const canonicalPayload = _canonicalStringify({
@@ -324,7 +324,7 @@ export async function generateJWT(payload, traceId = null) {
             throw new Error("UNSUPPORTED_JWT_ALGORITHM");
         }
 
-        const secret = await getSecret(SECRETS.AUTH_JWT_KEY);
+        const secret = await secrets.getSecretValue(SECRETS.AUTH_JWT_KEY);
         if (!secret) throw new Error("AUTH_JWT_KEY_NOT_FOUND");
 
         // BUG-02 FIX: JWT.EXPIRATION_MS (antes JWT.MS_EXPIRACION inexistente)
@@ -380,7 +380,7 @@ export async function verifyJWT(token, traceId = null) {
         if (!header || !payload) return null;
         if (header.alg !== "HS256" || header.typ !== "JWT") return null;
 
-        const secret = await getSecret(SECRETS.AUTH_JWT_KEY);
+        const secret = await secrets.getSecretValue(SECRETS.AUTH_JWT_KEY);
         if (!secret) throw new Error("AUTH_JWT_KEY_NOT_FOUND");
 
         const signingInput = `${parts[0]}.${parts[1]}`;

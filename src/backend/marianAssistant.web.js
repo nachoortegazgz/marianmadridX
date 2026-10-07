@@ -6,7 +6,7 @@ RESPONSIBILITY: Asistente operativo privado de Marian.
 =============================================================================
 */
 import { webMethod, Permissions } from "wix-web-module";
-import { getSecret } from "wix-secrets-backend";
+import { secrets } from "@wix/secrets";
 import { SECRETS } from "backend/mmSecrets";
 import { requireMarianManager } from "backend/security";
 import { _toPublicError } from "backend/responseUtils";
@@ -42,7 +42,7 @@ export const askMarianAssistant = webMethod(
       if (!cleanMessage) {
         throw new Error("Message required");
       }
-      const apiKey = await getSecret(
+      const apiKey = await secrets.getSecretValue(
         SECRETS.MARIAN_ASSISTANT_OPENAI_KEY
       ).catch(() => null);
       if (!apiKey) {

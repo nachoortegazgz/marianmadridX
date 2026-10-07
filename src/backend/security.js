@@ -17,8 +17,8 @@ CORRECTIONS APPLIED (ANEXO v8.1):
 =============================================================================
 */
 
-import wixData from "wix-data";
-import { currentMember } from "wix-members-backend";
+import wixData from "backend/dataClient";
+import { members } from "@wix/members";
 
 import {
     BUSINESS_COLLECTIONS,
@@ -379,7 +379,7 @@ export async function registerPersistentBlock(surface, key, durationMs, traceId 
 
 async function _getCurrentMemberInfo(traceId = null) {
     try {
-        const member = await currentMember.getMember();
+        const member = await members.getCurrentMember();
         if (!member) return null;
 
         const memberId = _safeString(member._id);

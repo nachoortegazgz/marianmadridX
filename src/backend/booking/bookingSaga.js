@@ -30,7 +30,7 @@ FIXES APLICADOS v5009-FISCAL-V20.3:
              f13/f15/f16: MS_TTL_MUTEX, MS_LATIDO, MINUTOS_MAX_HUECO_DUAL).
              v5010.4 FASE 2: cascadas legacy eliminadas; internalConfig ya
              solo expone los nombres V20.
-  - SAGA-08: availableStaff con fallback (staffDisponible, staffMemberIds).
+  - SAGA-08: availableStaff se lee exclusivamente desde el campo canónico.
   - SAGA-09: selectedPaymentOption ONLINE en create cuando path eCom.
 
 NOTA CONTRACTUAL (BIBLIA 2.2.1):
@@ -47,10 +47,10 @@ NOTA CONTRACTUAL (BIBLIA 2.2.1):
 */
 
 import { bookings } from "@wix/bookings";
-import { elevate } from "wix-auth";
+import { elevate } from "@wix/sdk";
 // EXCEPCION DATA API (APENDICE C de la BIBLIA): persistencia CMS server-side
 // con suppressAuth/suppressHooks; ver apendice antes de proponer migracion.
-import wixData from "wix-data";
+import wixData from "backend/dataClient";
 
 import {
     BUSINESS_COLLECTIONS,
@@ -593,14 +593,7 @@ async function _validateLinkedPhaseService(linkedPhases, parentLocationId, trace
         );
     }
 
-    // SAGA-08: cascada de nombres de staff. BIBLIA 4.3 fila 18 usa
-    // availableStaff; el mapping UX expone staffDisponible.
-    const availableStaff = cleanGuidList(
-        service.availableStaff ||
-        service.staffDisponible ||
-        service.disponibleStaff ||
-        service.staffMemberIds || []
-    );
+    const availableStaff = cleanGuidList(service.availableStaff || []);
     if (availableStaff.length === 0) {
         throw createBookingError(
             ERROR_CODES.STAFF_UNAVAILABLE,

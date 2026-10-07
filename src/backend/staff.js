@@ -16,7 +16,7 @@ CORRECTIONS APPLIED (ANEXO v8.1):
 =============================================================================
 */
 
-import wixData from "wix-data";
+import wixData from "backend/dataClient";
 
 import {
     BUSINESS_COLLECTIONS,
@@ -151,34 +151,23 @@ async function _loadAllStaff(traceId) {
 
     try {
         const catalog = _emptyCatalog();
-        let cursor = null;
-        let pageCount = 0;
-        const MAX_PAGES = 10;
+        const result = await wixData
+            .query(BUSINESS_COLLECTIONS.MAPA_STAFF)
+            .limit(1000)
+            .find({ suppressAuth: true });
 
-        do {
-            let query = wixData.query(BUSINESS_COLLECTIONS.MAPA_STAFF);
-            // C-01: sin filtro .eq("active", true)
-            const result = cursor
-                ? await query.find(cursor, { suppressAuth: true })
-                : await query.limit(100).find({ suppressAuth: true });
+        for (const item of result?.items || []) {
+            const record = _createStaffRecord(item);
+            if (!record) continue;
+            if (!record._id && !record.resourceId && !record.email) continue;
 
-            const items = result?.items || [];
-            for (const item of items) {
-                const record = _createStaffRecord(item);
-                if (!record) continue;
-                if (!record._id && !record.resourceId && !record.email) continue;
-
-                catalog.all.push(record);
-                _addToIndex(catalog.byResourceId, record.resourceId, record);
-                _addToIndex(catalog.byMemberId, record.memberId, record); // C-03
-                _addToIndex(catalog.byEmail, record.email, record);
-                _addToIndex(catalog.byScheduleId, record.scheduleId, record);
-                _addToIndex(catalog.byId, record._id, record);
-            }
-
-            cursor = result?.nextPage?.() || null;
-            pageCount += 1;
-        } while (cursor && pageCount < MAX_PAGES);
+            catalog.all.push(record);
+            _addToIndex(catalog.byResourceId, record.resourceId, record);
+            _addToIndex(catalog.byMemberId, record.memberId, record); // C-03
+            _addToIndex(catalog.byEmail, record.email, record);
+            _addToIndex(catalog.byScheduleId, record.scheduleId, record);
+            _addToIndex(catalog.byId, record._id, record);
+        }
 
         _cacheSet(cacheKey, catalog);
         return catalog;
@@ -302,6 +291,17 @@ export async function findStaffByMemberId(memberId, traceId = null) {
 }
 
 /**
+ * Resuelve el scheduleId Bookings asociado a un resourceId canonico.
+ * @param {string} resourceId
+ * @param {string} [traceId]
+ * @returns {Promise<string|null>}
+ */
+export async function getStaffScheduleId(resourceId, traceId = null) {
+    const staff = await findStaffByResourceId(resourceId, traceId);
+    return staff ? _normalizeText(staff.scheduleId) || null : null;
+}
+
+/**
  * Lista todo el staff (DTO publico).
  * @param {string} [traceId]
  * @returns {Promise<Array<Object>>}
@@ -349,7 +349,7 @@ export async function listStaffByRolBookings(rolBookings, traceId = null) {
 
 /**
  * Lista staff asignable a un servicio (por availableStaff Multi Reference).
- * C-05: resolucion vía wixData.queryReferences (SSOT-18).
+ * C-05: resolución mediante queryReferencedItems del SDK Data v2.
  * @param {string} serviceId - GUID ServiciosCatalogo.serviceId
  * @param {string} [traceId]
  * @returns {Promise<Array<Object>>}
@@ -363,11 +363,12 @@ export async function listStaffForService(serviceId, traceId = null) {
     if (cached !== null) return cached;
 
     try {
-        const refs = await wixData.queryReferences({
-            collectionName: BUSINESS_COLLECTIONS.SERVICIOS_CATALOGO,
-            fieldName: "availableStaff",
-            itemId: id,
-        });
+        const refs = await wixData.queryReferencedItems(
+            BUSINESS_COLLECTIONS.SERVICIOS_CATALOGO,
+            id,
+            "availableStaff",
+            { consistentRead: true }
+        );
 
         const staffIds = (refs?.items || []).map((ref) => ref._id || ref.id);
         const all = await listStaff(traceId);
