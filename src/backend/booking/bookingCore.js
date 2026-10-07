@@ -65,7 +65,7 @@ import { auth } from "@wix/essentials";
 // server-side via wixData con suppressAuth; ver apendice para el porque
 // no se migra a datasets.query('@wix/data').queryDataItems().
 import wixData from "backend/dataClient";
-import { getStaffScheduleId } from "backend/staff";
+import { getStaffByResourceId } from "backend/staff";
 import { logger } from "backend/logger";
 import {
     BUSINESS_COLLECTIONS,
@@ -299,7 +299,8 @@ export function _handleError(error, context, traceId, logFn) {
 async function _resolveScheduleIdByResourceId(resourceId) {
     const id = _safeTrim(resourceId);
     if (!id || !_looksLikeGuid(id)) return null;
-    const scheduleId = await getStaffScheduleId(id);
+    const staff = await getStaffByResourceId(id);
+    const scheduleId = staff?.scheduleId;
     return scheduleId && _looksLikeGuid(scheduleId) ? scheduleId : null;
 }
 

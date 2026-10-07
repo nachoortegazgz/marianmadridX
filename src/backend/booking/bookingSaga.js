@@ -440,10 +440,10 @@ function _validateDualGap(f1LocalEnd, f2LocalStart, traceId) {
     const rawDiffMinutes =
         (f2StartUtc.getTime() - f1EndUtc.getTime()) / 60000;
 
-    if (rawDiffMinutes < 0) {
+    if (rawDiffMinutes <= 0) {
         throw createBookingError(
             ERROR_CODES.INVALID_PAYLOAD,
-            "Dual gap validation: F2 starts before F1 ends (" +
+            "Dual gap validation: F2 must start after F1 ends to release staff (" +
             rawDiffMinutes.toFixed(2) + " min)", { traceId, gapMinutes: rawDiffMinutes }
         );
     }
@@ -486,15 +486,6 @@ async function _validateLinkedPhaseService(linkedPhases, parentLocationId, trace
         throw createBookingError(
             ERROR_CODES.SERVICE_NOT_FOUND,
             "Linked phase service " + linkedServiceId + " not found in catalog", { traceId }
-        );
-    }
-
-    const isHidden = service.clientHidden === true;
-
-    if (isHidden) {
-        throw createBookingError(
-            ERROR_CODES.SERVICE_NOT_FOUND,
-            "Linked phase service " + linkedServiceId + " is hidden", { traceId }
         );
     }
 
@@ -890,10 +881,22 @@ export async function executeBookingSaga(unsafePayload) {
                 const exposureMs =
                     Math.max(0, Number(serviceConfig.exposureDuration || 0)) * 60 * 1000;
                 const linkedPhase2Ms =
-                    Math.max(0, Number(linkedValidation.phase2Duration || 30)) * 60 * 1000;
+                    Math.max(0, Number(linkedValidation.phase2Duration)) * 60 * 1000;
                 const f2StartUtc = new Date(f1EndUtc.getTime() + exposureMs);
                 const f2EndUtc = new Date(f2StartUtc.getTime() + linkedPhase2Ms);
                 f2LocalStart = getMadridLocalStringNoZ(f2StartUtc);
+                f2LocalEnd = getMadridLocalStringNoZ(f2EndUtc);
+            } else if (!f2LocalEnd) {
+                const f2StartUtc = getUtcDateFromMadridLocal(f2LocalStart);
+                if (!f2StartUtc || !(linkedValidation.phase2Duration > 0)) {
+                    throw createBookingError(
+                        ERROR_CODES.INVALID_DATES,
+                        "Could not derive F2 end from linked service duration", { traceId }
+                    );
+                }
+                const f2EndUtc = new Date(
+                    f2StartUtc.getTime() + linkedValidation.phase2Duration * 60 * 1000
+                );
                 f2LocalEnd = getMadridLocalStringNoZ(f2EndUtc);
             }
 
@@ -1448,7 +1451,7 @@ export async function executeBookingSaga(unsafePayload) {
                             startDate: getUtcDateFromMadridLocal(f1LocalStart),
                             endDate: getUtcDateFromMadridLocal(f1LocalEnd),
                             dateYmd: f1LocalStart.slice(0, 10),
-                            bookingType: isDual ? BOOKING_TYPE.DUALF1 : BOOKING_TYPE.SIMPLE,
+                            bookingType: isDual ? BOOKING_TYPE.DUAL_F1 : BOOKING_TYPE.SIMPLE,
                             status: citaStatus,
                             bookingStatus: citaStatus,
                             paymentStatus: paymentStatus,
@@ -1500,7 +1503,7 @@ export async function executeBookingSaga(unsafePayload) {
                                 startDate: getUtcDateFromMadridLocal(f2LocalStart),
                                 endDate: getUtcDateFromMadridLocal(f2LocalEnd),
                                 dateYmd: f2LocalStart.slice(0, 10),
-                                bookingType: BOOKING_TYPE.DUALF2,
+                                bookingType: BOOKING_TYPE.DUAL_F2,
                                 status: citaStatus,
                                 bookingStatus: citaStatus,
                                 paymentStatus: paymentStatus,

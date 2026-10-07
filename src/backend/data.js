@@ -39,8 +39,6 @@ import {
 import {
     assertValidEnum,
     assertCitasF2,
-    assertMapaStaff,
-    assertServiciosCatalogo,
     assertDatosFiscales,
     assertControlOperativo,
     assertRegistrosHorariosStaff,
@@ -520,116 +518,10 @@ export function CajaActual_beforeRemove() {
 }
 
 // =============================================================================
-// BLOQUE 6 - ServiciosCatalogo (ANEXO v8.1 C-05/C-06)
+// BLOQUES 6-7 - Catalogos maestros
+// ServiciosCatalogo y MapaStaff son maestros CMS: no se aplican hooks de
+// contenido. Las necesidades operativas se validan en el consumidor.
 // =============================================================================
-
-export function ServiciosCatalogo_beforeInsert(item) {
-    _rejectActiveField(item, "ServiciosCatalogo");
-    return _validateServiciosCatalogoSchema(item);
-}
-
-export function ServiciosCatalogo_beforeUpdate(item) {
-    _rejectActiveField(item, "ServiciosCatalogo");
-    return _validateServiciosCatalogoSchema(item);
-}
-
-export function ServiciosCatalogo_beforeRemove(item) {
-    // Solo Admin. Verificacion de referencias activas en CitasF2 se hace
-    // a nivel de webMethod (reservas.web.js) antes de invocar remove.
-    return item;
-}
-
-function _validateServiciosCatalogoSchema(item) {
-    if (!item || typeof item !== "object") return item;
-
-    // Delega en assertServiciosCatalogo (validacion centralizada SSOT-07)
-    assertServiciosCatalogo(item);
-
-    // Calculo canonico de totalDuration (sin fallback 30, BIBLIA 2.1)
-    const phase1 = Number(item.phase1Duration) || 0;
-    const exposure = Number(item.exposureDuration) || 0;
-    const phase2 = Number(item.phase2Duration) || 0;
-
-    if (item.allowCombine === true) {
-        item.totalDuration = phase1 + exposure + phase2;
-    } else if (phase1 > 0) {
-        item.totalDuration = phase1;
-    }
-
-    if (!_isFiniteNonNegative(item.totalDuration)) {
-        _schemaError("totalDuration debe ser un numero no negativo");
-    }
-
-    return item;
-}
-
-// =============================================================================
-// BLOQUE 7 - MapaStaff (ANEXO v8.1 C-02/C-03)
-// =============================================================================
-
-export async function MapaStaff_beforeInsert(item) {
-    _rejectActiveField(item, "MapaStaff");
-    return _validateMapaStaffUniqueness(item);
-}
-
-export async function MapaStaff_beforeUpdate(item) {
-    _rejectActiveField(item, "MapaStaff");
-    return _validateMapaStaffUniqueness(item);
-}
-
-export function MapaStaff_beforeRemove(item) {
-    // Solo Admin. La verificacion de referencias activas (RegistrosHorariosStaff,
-    // CitasF2) se realiza a nivel de webMethod antes de invocar remove.
-    return item;
-}
-
-async function _validateMapaStaffUniqueness(item) {
-    if (!item || typeof item !== "object") return item;
-
-    // C-02/C-03: valida memberId, rolBookings, rolWebsite (no staffMemberId/staffRole)
-    assertMapaStaff(item);
-
-    const itemId = _safeTrim(item._id);
-    const resourceId = _safeTrim(item.resourceId);
-    const memberId = _safeTrim(item.memberId);
-    const email = _safeTrim(item.email).toLowerCase();
-
-    if (resourceId) {
-        const existingByResource = await wixData
-            .query(BUSINESS_COLLECTIONS.MAPA_STAFF)
-            .eq("resourceId", resourceId)
-            .ne("_id", itemId)
-            .limit(1)
-            .find({ suppressAuth: true });
-
-        if (existingByResource?.items?.length > 0) {
-            _schemaError("resourceId duplicado en MapaStaff");
-        }
-    }
-
-    // C-03: unicidad por memberId (antes staffMemberId)
-    if (memberId) {
-        const existingByMember = await wixData
-            .query(BUSINESS_COLLECTIONS.MAPA_STAFF)
-            .eq("memberId", memberId)
-            .ne("_id", itemId)
-            .limit(1)
-            .find({ suppressAuth: true });
-
-        if (existingByMember?.items?.length > 0) {
-            _schemaError("memberId duplicado en MapaStaff (ANEXO v8.1 C-03)");
-        }
-    }
-
-    if (email) {
-        // ADR-03: email NO unico (permite correos compartidos de empresa)
-        log.warn("MapaStaff email registrado (ADR-03: indice no unico)", {
-            emailDomain: email.split("@")[1] || "",
-        });
-    }
-
-    return item;
-}
 
 // =============================================================================
 // BLOQUE 8 - LibroAsientosContablesDetalle (LEDGER CONTABLE, ADR-10)
@@ -744,37 +636,10 @@ function _validateDatosFiscalesSchema(item) {
 }
 
 // =============================================================================
-// BLOQUE 10 - ComplementosCatalogo (SSOT-17, ADR-04 v2)
+// BLOQUE 10 - ComplementosCatalogo
+// Catalogo maestro CMS: sin hooks de contenido ni campos transaccionales
+// obligatorios. Los usos de reserva validan solo los datos que consumen.
 // =============================================================================
-
-export function ComplementosCatalogo_beforeInsert(item) {
-    if (!item || typeof item !== "object") return item;
-    _rejectActiveField(item, "ComplementosCatalogo");
-
-    if (!_safeTrim(item.addOnId)) {
-        _schemaError("ComplementosCatalogo.addOnId obligatorio");
-    }
-    if (!_isFiniteNonNegative(item.price)) {
-        _schemaError("ComplementosCatalogo.price debe ser >= 0");
-    }
-    if (!_safeTrim(item.traceId)) {
-        _schemaError("ComplementosCatalogo.traceId obligatorio (SSOT-12)");
-    }
-
-    return item;
-}
-
-export function ComplementosCatalogo_beforeUpdate(item) {
-    if (!item || typeof item !== "object") return item;
-    _rejectActiveField(item, "ComplementosCatalogo");
-    return item;
-}
-
-export function ComplementosCatalogo_beforeRemove(item) {
-    // Solo Admin. Verificacion de referencias en ServiciosCatalogo.addOnOptions
-    // se realiza a nivel de webMethod antes de invocar remove.
-    return item;
-}
 
 // =============================================================================
 // BLOQUE 11 - CitasF2 (PROYECCION BOOKINGS)

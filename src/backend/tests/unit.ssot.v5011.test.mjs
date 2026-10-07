@@ -27,16 +27,11 @@ const COLLECTIONS_MERGED = Object.freeze({
   ...IC.OPERATIONAL_COLLECTIONS,
 });
 
-// Compat mapping for legacy Spanish enum names used by the v5002.6 runner.
-// ESTADO_CITA/ESTADO_PAGO were removed in internalConfig V20.1; canonical is
-// BOOKING_STATUS/PAYMENT_STATUS. This adapter keeps every original assertion.
+// Canonical enum references used by the prior runner.
 const ESTADO_CITA = BOOKING_STATUS_ADAPTER();
 const ESTADO_PAGO = PAYMENT_STATUS_ADAPTER();
 function BOOKING_STATUS_ADAPTER() {
-  const s = { ...IC.BOOKING_STATUS };
-  // legacy alias expected by runner: CANCELED points to CANCELLED value
-  if (s.CANCELLED !== undefined) s.CANCELED = s.CANCELLED;
-  return s;
+  return { ...IC.BOOKING_STATUS };
 }
 function PAYMENT_STATUS_ADAPTER() {
   return { ...IC.PAYMENT_STATUS };
@@ -69,15 +64,11 @@ test('UNIT-GEN-03 date conversion Madrid TZ stable', () => {
 });
 
 test('UNIT-ENUM-01 booking enums aligned with canonical SSOT', () => {
-  // FASE2 BIBLIA 12.2: BOOKING_STATUS canonico en ingles (PENDING/CANCELED);
-  // los antiguos PENDING_PAYMENT/CANCELLED son solo lectura legacy.
+  // BOOKING_STATUS canonico en ingles (PENDING/CANCELED); no alias legacy.
   assert.strictEqual(ESTADO_CITA.CONFIRMED, 'CONFIRMED');
   assert.strictEqual(ESTADO_CITA.PENDING, 'PENDING');
   assert.strictEqual(ESTADO_CITA.CANCELED, 'CANCELED');
-  assert.strictEqual(IC.BOOKING_STATUS.PENDING_PAYMENT, undefined);
   assert.strictEqual(IC.BOOKING_STATUS.CANCELLED, undefined);
-  assert.ok(IC.LEGACY_BOOKING_STATUS_VALUES.includes('PENDING_PAYMENT'));
-  assert.ok(IC.LEGACY_BOOKING_STATUS_VALUES.includes('CANCELLED'));
   assert.strictEqual(ESTADO_PAGO.PAID, 'PAID');
   // FASE1-P0: alias UNPAID was eradicated from PAYMENT_STATUS (MATRIZ alias F).
   // Strengthened assertion: the retired key must NOT exist and the canonical

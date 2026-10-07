@@ -73,7 +73,7 @@ function _readServiceField(service, field) {
 
 function _normalizeAddon(addOn) {
   if (!addOn || typeof addOn !== "object") return null;
-  const addOnId = _safeTrim(addOn.addOnId);
+  const addOnId = _safeTrim(addOn.addonId);
   const name = _safeTrim(addOn.name);
   const price = Number(addOn.price);
   if (!addOnId || !name || !Number.isFinite(price)) return null;
@@ -1135,7 +1135,7 @@ export async function _getCertifiedDualSlotsInternal(serviceId, resourceId, date
       if (!f2StartUtc) continue;
 
       const gapMinutes = computeGapMinutes(range.endUtc, f2StartUtc);
-      if (gapMinutes < 0 || gapMinutes > MINUTOS_MAX_HUECO_DUAL) continue;
+      if (gapMinutes <= 0 || gapMinutes > MINUTOS_MAX_HUECO_DUAL) continue;
 
       const f2Resources = _getResourceIdsFromSlot(f2);
       const shared = f1Resources.filter((id) => f2Resources.includes(id));

@@ -43,7 +43,6 @@ import {
   SDK_CONFIG,
   isValidGuid,
 } from "backend/internalConfig";
-import { assertMapaStaff } from "backend/validation";
 import { logger } from "backend/logger";
 
 const log = logger;
@@ -178,23 +177,7 @@ export async function getStaffByResourceId(resourceId, options = {}) {
     consistency: _consistencyOf(options),
   });
 
-  let dto = null;
-  if (record) {
-    try {
-      assertMapaStaff(record);
-      dto = _buildPublicDTO(record);
-    } catch (error) {
-      log.error(
-        "STAFF_SCHEMA_VIOLATION: registro MapaStaff invalido en lectura; se descarta",
-        {
-          resourceId: rid,
-          message: String((error && error.message) || error || ""),
-          traceId: options.traceId || null,
-        }
-      );
-      dto = null;
-    }
-  }
+  const dto = _buildPublicDTO(record);
 
   if (!dto) dto = _fallbackDisplayDto(rid);
   _cacheSet(cacheKey, dto);
@@ -221,23 +204,7 @@ export async function getStaffByMemberId(memberId, options = {}) {
     consistency: _consistencyOf(options),
   });
 
-  let dto = null;
-  if (record) {
-    try {
-      assertMapaStaff(record);
-      dto = _buildPublicDTO(record);
-    } catch (error) {
-      log.error(
-        "STAFF_SCHEMA_VIOLATION: registro MapaStaff invalido en lectura; se descarta",
-        {
-          memberId: mid,
-          message: String((error && error.message) || error || ""),
-          traceId: options.traceId || null,
-        }
-      );
-      dto = null;
-    }
-  }
+  const dto = _buildPublicDTO(record);
 
   _cacheSet(cacheKey, dto);
   return dto;
@@ -259,18 +226,6 @@ export async function getStaffByEmail(email, options = {}) {
   });
 
   if (!record) return null;
-  try {
-    assertMapaStaff(record);
-  } catch (error) {
-    log.error(
-      "STAFF_SCHEMA_VIOLATION: registro MapaStaff invalido en resolucion por email",
-      {
-        message: String((error && error.message) || error || ""),
-        traceId: options.traceId || null,
-      }
-    );
-    return null;
-  }
   return _buildPublicDTO(record);
 }
 
@@ -289,7 +244,8 @@ export function isOperationalWebsiteRole(rolWebsite) {
 
 /**
  * Lista el staff operativo para el canal website (agenda publica y panel).
- * Registros invalidos se descartan con error en logger (nunca rompen la lista).
+ * El CMS es SSOT: se devuelve un DTO whitelist sin imponer validacion de
+ * contenido. Los guards de reserva verifican sus requisitos en la operacion.
  * @param {{traceId?: string}} [options]
  * @returns {Promise<Array<Object>>} DTOs publicos ordenados por staffName.
  */
@@ -309,20 +265,8 @@ export async function listOperationalStaff(options = {}) {
 
   const list = [];
   for (const record of records) {
-    try {
-      assertMapaStaff(record);
-      const dto = _buildPublicDTO(record);
-      if (dto) list.push(dto);
-    } catch (error) {
-      log.error(
-        "STAFF_SCHEMA_VIOLATION: registro MapaStaff invalido; excluido del listado operativo",
-        {
-          resourceId: String((record && record.resourceId) || "UNKNOWN"),
-          message: String((error && error.message) || error || ""),
-          traceId: options.traceId || null,
-        }
-      );
-    }
+    const dto = _buildPublicDTO(record);
+    if (dto) list.push(dto);
   }
 
   // Red de seguridad de DISPLAY: recursos hardcodeados ausentes del CMS.
