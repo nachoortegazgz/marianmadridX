@@ -312,5 +312,3 @@ $w.onReady(async () => {
     );
   }
 });
-
-**Importante:** este archivo aún normaliza `serviceId` como GUID y requiere `slug`. Si el contrato real garantiza el identificador mediante `_id`, o permite servicios sin slug, esa validación debe ajustarse junto con `getServiceBySlugOrId`; no conviene cambiarla a ciegas aquí.
