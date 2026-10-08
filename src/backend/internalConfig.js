@@ -354,17 +354,6 @@ export const ITEM_NATURE = Object.freeze({
   GASTO_FIJO: "GASTO_FIJO",
 });
 
-// ANEXO D SSOT v9.1 (D.2.3 / D.9): CATALOG_STATES queda DEPRECATED.
-// El campo 'status' de ServiciosCatalogo y ComplementosCatalogo esta
-// pendiente de ADR: NO debe usarse para filtrar, validar ni condicionar
-// flujos hasta la aprobacion del ADR + migracion de datos.
-// Contrato futuro previsto: DRAFT | PUBLISHED | ARCHIVED.
-export const CATALOG_STATES = Object.freeze({
-  ACTIVO: "ACTIVO",
-  INACTIVO: "INACTIVO",
-  BORRADOR: "BORRADOR",
-});
-
 // =============================================================================
 // BLOQUE 9 - ROLES (ANEXO v8.1 C-02: separacion Bookings vs Website)
 // =============================================================================
@@ -816,7 +805,6 @@ export const IRPF_WITHHOLDING_RATE = Object.freeze({
 // BLOQUE 15 - CONFIGURACION DE CATALOGO Y SLOTS
 // =============================================================================
 export const CATALOG_CONFIG = Object.freeze({
-  STATES: CATALOG_STATES,
   CURRENCY: "EUR",
   MAX_TITLE_LENGTH: 160,
   MAX_SUMMARY_LENGTH: 120,
@@ -857,7 +845,6 @@ export const VALIDATION_SETS = Object.freeze({
   CLOCK_EVENT_TYPES: new Set(Object.values(CLOCK_EVENT_TYPE)),
   INVENTORY_MOVEMENT_TYPES: new Set(Object.values(INVENTORY_MOVEMENT_TYPE)),
   ITEM_NATURES: new Set(Object.values(ITEM_NATURE)),
-  CATALOG_STATES_SET: new Set(Object.values(CATALOG_STATES)),
   ROL_BOOKINGS_SET: new Set(Object.values(ROL_BOOKINGS)),
   ROL_WEBSITE_SET: new Set(Object.values(ROL_WEBSITE)),
   CODIGOS_IMPUESTO: new Set(Object.values(CODIGO_IMPUESTO)),

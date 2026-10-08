@@ -47,7 +47,8 @@ const log = logger;
 // BLOQUE 0 - HELPERS INTERNOS
 // =============================================================================
 
-const LEDGERSCHEMAVERSIONAEAT = INTEGRITY.LEDGERSCHEMA_VERSION;
+const LEDGERSCHEMAVERSIONAEAT = INTEGRITY.LEDGER_SCHEMA_VERSION;
+const CONTROLTYPE = CONTROL_TYPE;
 
 const IMMUTABLEENTRYSTATUSES = new Set(["POSTED", "LOCKED"]);
 
@@ -64,6 +65,8 @@ function _safeTrim(value) {
     return String(value).trim();
 }
 
+const safeTrim = _safeTrim;
+
 function _isGuid(value) {
     return isValidGuid(value);
 }
@@ -78,11 +81,11 @@ function _isV5Fiscal(item) {
 }
 
 function _fiscalError(message) {
-    throw new Error(FISCAL_VIOLATION: ${message});
+    throw new Error(`FISCAL_VIOLATION: ${message}`);
 }
 
 function _schemaError(message) {
-    throw new Error(SCHEMA_VIOLATION: ${message});
+    throw new Error(`SCHEMA_VIOLATION: ${message}`);
 }
 
 // =============================================================================
@@ -242,7 +245,9 @@ function _validateFiscalPayload(item) {
 
     if (
         !Number.isFinite(Number(item.sequenceNumber)) ||
-        Number(item.sequenceNumber)  0)");
+        Number(item.sequenceNumber) <= 0
+    ) {
+        _schemaError("sequenceNumber debe ser mayor que 0");
     }
 
     if (!_safeTrim(item.recordHash)) {
@@ -283,7 +288,7 @@ export function MovimientosCaja_beforeInsert(item) {
         const diff = Math.abs(expected - total);
         if (diff > 0.02) {
             _schemaError(
-                Cuadre fiscal invalido (rol ${role}): base ${finalBase} + cuota ${finalTax} + recargo ${surcharge} ${withholdingFactor > 0 ? "+" : "-"} retencion ${withholding} = ${expected.toFixed(2)}, total ${total.toFixed(2)}
+                `Cuadre fiscal invalido (rol ${role}): base ${finalBase} + cuota ${finalTax} + recargo ${surcharge} ${withholdingFactor > 0 ? "+" : "-"} retencion ${withholding} = ${expected.toFixed(2)}, total ${total.toFixed(2)}`
             );
         }
     }
@@ -308,12 +313,12 @@ export function MovimientosCaja_beforeInsert(item) {
         }
         if (Math.abs(_roundItem(sumBase) - finalBase) > 0.02) {
             _schemaError(
-                detailedBreakdown.base (${sumBase}) no cuadra con cabecera (${finalBase})
+                `detailedBreakdown.base (${sumBase}) no cuadra con cabecera (${finalBase})`
             );
         }
         if (Math.abs(_roundItem(sumTax) - finalTax) > 0.02) {
             _schemaError(
-                detailedBreakdown.cuota (${sumTax}) no cuadra con cabecera (${finalTax})
+                `detailedBreakdown.cuota (${sumTax}) no cuadra con cabecera (${finalTax})`
             );
         }
     }
@@ -330,7 +335,7 @@ export function MovimientosCaja_beforeInsert(item) {
         _schemaError("traceId obligatorio en MovimientosCaja (SSOT-12)");
     }
     if (safeTrim(item.schemaVersion) !== LEDGERSCHEMAVERSIONAEAT) {
-        schemaError(schemaVersion debe ser "${LEDGERSCHEMAVERSIONAEAT}");
+        _schemaError(`schemaVersion debe ser "${LEDGERSCHEMAVERSIONAEAT}"`);
     }
 
     return item;
@@ -367,7 +372,8 @@ export function HistoricoCierresZ_beforeInsert(item) {
 
     const start = Number(item.startSequence);
     const end = Number(item.endSequence);
-    if (Number.isFinite(start) && Number.isFinite(end) && end = startSequence (${start}));
+    if (Number.isFinite(start) && Number.isFinite(end) && end < start) {
+        _schemaError(`endSequence (${end}) no puede ser menor que startSequence (${start})`);
     }
 
     return item;
@@ -481,7 +487,7 @@ export function LibroAsientosContablesDetalle_beforeInsert(item) {
 
     const code = _safeTrim(item.accountCode || item.cuentaContable);
     if (code && !/^\d{6}$/.test(code)) {
-        _schemaError(accountCode "${code}" no tiene formato PGC (6 digitos));
+        _schemaError(`accountCode "${code}" no tiene formato PGC (6 digitos)`);
     }
 
     if (isV5Fiscal(item) || safeTrim(item.sourceEventId || item.eventoOrigenId)) {
@@ -500,10 +506,12 @@ export function LibroAsientosContablesDetalle_beforeInsert(item) {
         }
 
         const lineNumber = Number(item.lineNumber ?? item.numeroLinea);
-        if (!Number.isFinite(lineNumber) || lineNumber = 1");
+        if (!Number.isFinite(lineNumber) || lineNumber < 1) {
+            _schemaError("lineNumber debe ser mayor o igual que 1");
         }
 
-        if (!Number.isFinite(Number(item.units)) || Number(item.units)  0");
+        if (!Number.isFinite(Number(item.units)) || Number(item.units) <= 0) {
+            _schemaError("units debe ser mayor que 0");
         }
 
         const opDesc = _safeTrim(
@@ -633,7 +641,7 @@ export async function MovimientosInventario_beforeInsert(item) {
         .find({ suppressAuth: true });
 
     if (existing?.items?.length > 0) {
-        _fiscalError(movementToken duplicado en MovimientosInventario: ${token});
+        _fiscalError(`movementToken duplicado en MovimientosInventario: ${token}`);
     }
 
     return item;
@@ -660,14 +668,14 @@ export function ControlOperativo_beforeInsert(item) {
 export function ControlOperativo_beforeUpdate(item, context) {
     const original = context?.original || item;
     if (safeTrim(original?.controlType) === CONTROLTYPE.WEBHOOK_EVENT) {
-        fiscalError("WEBHOOKEVENT es append-only (ADR-05).");
+        _fiscalError("WEBHOOKEVENT es append-only (ADR-05).");
     }
     return item;
 }
 
 export function ControlOperativo_beforeRemove(item) {
     if (safeTrim(item?.controlType) === CONTROLTYPE.WEBHOOK_EVENT) {
-        fiscalError("Borrado prohibido en WEBHOOKEVENT (ADR-05).");
+        _fiscalError("Borrado prohibido en WEBHOOKEVENT (ADR-05).");
     }
     return item;
 }
@@ -698,7 +706,7 @@ function _validateStockCoherence(item) {
     if (Number.isFinite(stockOnHand) && Number.isFinite(stockAvailable)) {
         if (Math.abs(stockOnHand - stockReserved - stockAvailable) > 0.001) {
             _schemaError(
-                stockAvailable (${stockAvailable}) debe ser stockOnHand (${stockOnHand}) - stockReserved (${stockReserved})
+                `stockAvailable (${stockAvailable}) debe ser stockOnHand (${stockOnHand}) - stockReserved (${stockReserved})`
             );
         }
     }

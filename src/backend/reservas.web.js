@@ -41,6 +41,7 @@ import {
   _safeSlugOrId,
   _looksLikeGuid,
   _normalizeLocalIsoStr,
+  getReferenceIds,
   getUtcDateFromMadridLocal,
   _executeWithRetry,
   withTimeout
@@ -57,7 +58,11 @@ import {
 } from "backend/booking/bookingUtils";
 
 import { logger } from "backend/logger";
-import { getStaffDisplayName } from "backend/staff";
+import {
+  getStaffByMemberId,
+  getStaffByResourceId,
+  getStaffDisplayName
+} from "backend/staff";
 import { normalizeBookingStatus } from "backend/validation";
 
 const log = logger;
@@ -78,8 +83,10 @@ function _normalizeAddon(addOn) {
   const price = Number(addOn.price);
   if (!addOnId || !name || !Number.isFinite(price)) return null;
   return {
+    _id: addOnId,
     addOnId,
     name,
+    title: name,
     price,
     nativeId: _safeTrim(addOn.nativeId) || null
   };
@@ -253,6 +260,23 @@ async function _getStaffDisplayNamePublic(resourceId) {
   } catch (_) {
     return STAFF_DEFAULT_NAME;
   }
+}
+
+async function _resolveAvailableStaffResourceIds(value, traceId) {
+  const references = getReferenceIds(value).filter(_looksLikeGuid);
+  const resourceIds = [];
+  for (const referenceId of references) {
+    const byResource = await getStaffByResourceId(referenceId, { traceId });
+    if (byResource?.resourceId && _looksLikeGuid(byResource.resourceId)) {
+      resourceIds.push(byResource.resourceId);
+      continue;
+    }
+    const byMember = await getStaffByMemberId(referenceId, { traceId });
+    if (byMember?.resourceId && _looksLikeGuid(byMember.resourceId)) {
+      resourceIds.push(byMember.resourceId);
+    }
+  }
+  return Array.from(new Set(resourceIds));
 }
 
 function _getRequestedAddonContext(service, requestedAddonIds) {
@@ -516,7 +540,12 @@ export async function _mapServiceImport2ToUX(service, traceId) {
 
   const estimatedTotal = phaseSum;
 
-  const availableStaff = cleanGuidList(_readServiceField(service, "availableStaff"));
+  // Las referencias del catálogo pueden apuntar a Members; Bookings necesita
+  // siempre el resourceId nativo, nunca memberId ni el _id de la referencia.
+  const availableStaff = await _resolveAvailableStaffResourceIds(
+    _readServiceField(service, "availableStaff"),
+    traceId
+  );
 
   const staffOptions = await Promise.all(
     availableStaff.map(async (resourceId) => {
@@ -540,6 +569,11 @@ export async function _mapServiceImport2ToUX(service, traceId) {
   return {
     serviceId,
     slug,
+    title,
+    tagLine: shortDescription,
+    description: longDescription,
+    location,
+    price,
     serviceType,
     sku,
     categoryId,
@@ -572,6 +606,11 @@ export async function _mapServiceImport2ToUX(service, traceId) {
     addOnOptions,
     mainMedia,
     metadata: {
+      title,
+      tagLine: shortDescription,
+      description: longDescription,
+      location,
+      price,
       titulo: title,
       tituloServicio: title,
       precio: price,
