@@ -86,6 +86,14 @@ function _normalizeAddon(addOn) {
 }
 
 const SERVICIOS_COL = BUSINESS_COLLECTIONS.SERVICIOS_CATALOGO;
+// ANEXO D SSOT v9.1 (D.2.3 / D.9): el campo 'status' de ServiciosCatalogo y
+// ComplementosCatalogo esta PENDIENTE DE ADR. Los datos reales del CMS usan
+// valores legacy (p. ej. "ACTIVO") que no pertenecen al enum deseado
+// (DRAFT | PUBLISHED | ARCHIVED). Por tanto:
+//   - NUNCA se filtra por status en lecturas publicas (no .eq("status", ...)).
+//   - La visibilidad al cliente se determina EXCLUSIVAMENTE por clientHidden.
+//   - El codigo debe funcionar igual con datos ACTIVO hoy y con el enum futuro.
+const VISIBILIDAD_SERVICIO_CAMPO = "clientHidden";
 const WATCHDOG_TIMEOUT_MS = SDK_CONFIG.TIMEOUTS.WATCHDOG_MS;
 const SERVICE_CACHE_TTL_MS = SDK_CONFIG.CACHE.SERVICES_TTL_MS;
 const DIAS_LIMITE = SLOT_SEARCH.DIAS_LIMITE;
@@ -354,6 +362,11 @@ export async function _getServiceBySlugOrIdInternal(slugOrId, externalTraceId = 
   }
 
   try {
+    // CORRECCION ANEXO D SSOT v9.1 (D.2.3): las queries de ServiciosCatalogo
+    // NO filtran por "status" (ni "PUBLISHED" ni ningun otro valor). El campo
+    // status esta pendiente de ADR y los datos reales contienen "ACTIVO";
+    // filtrar por el enum futuro bloquearia la lectura de servicios validos.
+    // La visibilidad se determina exclusivamente por clientHidden === false.
     let result;
 
     if (isGuid) {
@@ -381,6 +394,16 @@ export async function _getServiceBySlugOrIdInternal(slugOrId, externalTraceId = 
     const service = result?.items?.[0] || null;
     if (!service) {
       log.error("Service not found in catalog", { key: clean, traceId });
+      return {
+        status: "ERROR",
+        data: null,
+        error: { code: "SERVICE_NOT_FOUND", message: "Service not found." }
+      };
+    }
+
+    // Unica puerta de visibilidad publica: clientHidden (no status).
+    if (_readServiceField(service, VISIBILIDAD_SERVICIO_CAMPO) === true) {
+      log.warn("Service hidden from client (clientHidden=true)", { key: clean, traceId });
       return {
         status: "ERROR",
         data: null,
@@ -850,6 +873,9 @@ export const getAvailableDays = webMethod(
   async (serviceIdOrSlug, resourceId, year, month, addOnIds = []) => {
     const traceId = makeTraceId("available-days");
     try {
+      // CORRECCION ANEXO D SSOT v9.1 (D.2.3): sin filtro por "status".
+      // _getServiceBySlugOrIdInternal ya aplica la unica puerta de visibilidad
+      // vigente: clientHidden === false. El campo status se ignora hasta ADR.
       const serviceResult = await _getServiceBySlugOrIdInternal(serviceIdOrSlug, traceId);
       if (serviceResult?.status !== "SUCCESS" || !serviceResult.data?.serviceId) {
         return {

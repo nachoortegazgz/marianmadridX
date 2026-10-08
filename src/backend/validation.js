@@ -41,7 +41,9 @@ import {
   CLOCK_EVENT_TYPE,
   RECORD_TYPE_HORARIOS,
   ITEM_NATURE,
-  CATALOG_STATES,
+  // CATALOG_STATES: import retirado. El campo 'status' de ServiciosCatalogo y
+  // ComplementosCatalogo esta pendiente de ADR (ANEXO D SSOT v9.1 D.2.3/D.9)
+  // y no debe validarse ni imponerse en codigo hasta su aprobacion.
   CASH_REGISTER_STATUS,
   PRICING_MODEL,
   DEPOSIT_TYPE,
@@ -372,7 +374,12 @@ export function assertServiciosCatalogo(item) {
     throw new Error("SCHEMA_VIOLATION: ServiciosCatalogo.sku es obligatorio");
   }
 
-  assertValidEnum(item.status, CATALOG_STATES, "status");
+  // ANEXO D SSOT v9.1 (D.2.3 / D.9): el campo 'status' de ServiciosCatalogo
+  // esta PENDIENTE DE ADR. Los datos reales del CMS contienen valores como
+  // "ACTIVO" que no cumplen el contrato deseado (DRAFT|PUBLISHED|ARCHIVED).
+  // NO se valida status hasta la aprobacion del ADR + migracion de datos.
+  // El modulo debe funcionar tanto con datos legacy (ACTIVO) como con el
+  // enum futuro, sin depender de ninguno de los dos.
   assertValidEnum(item.itemNature, ITEM_NATURE, "itemNature");
 
   if (item.pricingModel !== undefined && item.pricingModel !== null && item.pricingModel !== "") {
@@ -853,8 +860,14 @@ export function assertCashRegisterStatus(value) {
   return assertValidEnum(value, CASH_REGISTER_STATUS, "cashRegisterStatus");
 }
 
-export function assertCatalogStatus(value) {
-  return assertValidEnum(value, CATALOG_STATES, "status");
+// ANEXO D SSOT v9.1 (D.2.3 / D.9): status en ServiciosCatalogo y
+// ComplementosCatalogo esta PENDIENTE DE ADR. Este helper queda como
+// NO-OP deliberado: no rechaza ni impone ningun valor. Se reactivara
+// (validando DRAFT|PUBLISHED|ARCHIVED) solo tras ADR + migracion de datos.
+// No usarlo para filtrar ni condicionar flujos de negocio.
+export function assertCatalogStatus(_value) {
+  // No-op hasta ADR aprobado.
+  return _value;
 }
 
 export function assertCompensationKind(value) {
