@@ -354,6 +354,11 @@ export const ITEM_NATURE = Object.freeze({
   GASTO_FIJO: "GASTO_FIJO",
 });
 
+// ANEXO D SSOT v9.1 (D.2.3 / D.9): CATALOG_STATES queda DEPRECATED.
+// El campo 'status' de ServiciosCatalogo y ComplementosCatalogo esta
+// pendiente de ADR: NO debe usarse para filtrar, validar ni condicionar
+// flujos hasta la aprobacion del ADR + migracion de datos.
+// Contrato futuro previsto: DRAFT | PUBLISHED | ARCHIVED.
 export const CATALOG_STATES = Object.freeze({
   ACTIVO: "ACTIVO",
   INACTIVO: "INACTIVO",
