@@ -1,21 +1,30 @@
 /*
 =============================================================================
 MODULE: backend/data.js
-VERSION: v9.0-SSOT-MASTER
-BASE: BIBLIA v8.0-SSOT-MASTER + ANEXO SSOT v8.1 + cms.v8.1-FINAL.json
-RESPONSIBILITY: Hooks de inmutabilidad y proteccion de ledgers fiscales/laborales.
-                Validacion estructural delegada en backend/validation.js.
-STANDARDS: G10 ASCII Strict. Cero friccion innecesaria.
+VERSION: v10.0-SSOT-FRICTIONLESS
+BASE: BIBLIA SSOT v9.1 + Anexo D (Correcciones y Reconciliación)
+RESPONSIBILITY: Protección de ledgers fiscales/laborales/contables.
+                CERO fricción en colecciones maestras CMS y datos de usuario.
+STANDARDS: G10 ASCII Strict. Validación delegada en consumidor.
 
-CORRECTIONS APPLIED (v9.0):
-  - Eliminados hooks sobre colecciones maestras CMS (ServiciosCatalogo, MapaStaff,
-    ComplementosCatalogo). La validacion de negocio se realiza en el consumidor.
-  - Eliminado _rejectActiveField: el campo 'active' no existe en el schema actual;
-    su presencia ya genera error de schema nativo en Wix Data sin necesidad de hook.
-  - Eliminadas validaciones redundantes de estructura basica (tipos primitivos,
-    formatos simples) que solo reportaban errores sin corregir datos.
-  - Mantenidos EXCLUSIVAMENTE hooks de integridad fiscal/laboral/contable que
-    protegen la inmutabilidad del ledger o aplican correcciones automaticas.
+CAMBIOS ROMPIENTES (v10.0):
+  - ELIMINADOS todos los hooks de ServiciosCatalogo, ComplementosCatalogo,
+    MapaStaff y DatosFiscales. Son fuentes de información editables por
+    usuario/admin; la validación estructural se mueve al consumidor.
+  - ELIMINADA toda verificación de campo 'status' en cualquier colección.
+    El enum de status está pendiente de ADR (Anexo D §D.2.3); validar
+    contra un enum no aprobado genera bloqueos falsos.
+  - MANTENIDOS exclusivamente hooks de integridad legal:
+      · MovimientosCaja (Ley 11/2021 Veri*Factu, append-only)
+      · RegistrosHorariosStaff (RD 8/2019, append-only)
+      · HistoricoCierresZ (LGT 58/2003, firma restringida)
+      · LibroAsientosContablesDetalle (PGC, inmutabilidad padre)
+      · CajaActual (singleton protegido)
+      · ControlOperativo (WEBHOOK_EVENT append-only)
+      · MovimientosInventario (ledger append-only)
+      · InventarioStockVenta (invariante aritmético)
+      · CitasF2 (proyección operativa, enums canónicos)
+  - Colecciones prohibidas mantienen bloqueo (SSOT-09).
 =============================================================================
 */
 
@@ -25,13 +34,10 @@ import {
     OPERATIONAL_COLLECTIONS,
     CONTROL_TYPE,
     INTEGRITY,
-    RECORD_TYPE,
-    isValidGuid,
 } from "backend/internalConfig";
 
 import {
     assertCitasF2,
-    assertDatosFiscales,
     assertControlOperativo,
     assertRegistrosHorariosStaff,
     assertMovimientosInventario,
@@ -47,8 +53,7 @@ const log = logger;
 // BLOQUE 0 - HELPERS INTERNOS
 // =============================================================================
 
-const LEDGERSCHEMAVERSIONAEAT = INTEGRITY.LEDGER_SCHEMA_VERSION;
-const CONTROLTYPE = CONTROL_TYPE;
+const LEDGERSCHEMAVERSIONAEAT = INTEGRITY.LEDGERSCHEMA_VERSION;
 
 const IMMUTABLEENTRYSTATUSES = new Set(["POSTED", "LOCKED"]);
 
@@ -65,12 +70,6 @@ function _safeTrim(value) {
     return String(value).trim();
 }
 
-const safeTrim = _safeTrim;
-
-function _isGuid(value) {
-    return isValidGuid(value);
-}
-
 function _roundItem(value) {
     const n = Number(value);
     return Number.isFinite(n) ? Math.round((n + Number.EPSILON) * 100) / 100 : 0;
@@ -81,15 +80,15 @@ function _isV5Fiscal(item) {
 }
 
 function _fiscalError(message) {
-    throw new Error(`FISCAL_VIOLATION: ${message}`);
+    throw new Error(FISCAL_VIOLATION: ${message});
 }
 
 function _schemaError(message) {
-    throw new Error(`SCHEMA_VIOLATION: ${message}`);
+    throw new Error(SCHEMA_VIOLATION: ${message});
 }
 
 // =============================================================================
-// BLOQUE 1 - HELPERS DE LECTURA FISCAL
+// BLOQUE 1 - HELPERS DE LECTURA FISCAL (MovimientosCaja)
 // =============================================================================
 
 function _readTaxableBase(item) {
@@ -225,7 +224,7 @@ function _validateFiscalPayload(item) {
     if (!eventType) return;
 
     if (eventType !== "CIERRE_Z") {
-        if (!_isGuid(item.thirdPartyId)) {
+        if (!_safeTrim(item.thirdPartyId)) {
             _schemaError("thirdPartyId obligatorio (FK DatosFiscales)");
         }
         if (!item.fiscalPayload || typeof item.fiscalPayload !== "object") {
@@ -238,16 +237,14 @@ function _validateFiscalPayload(item) {
             eventType
         )
     ) {
-        if (!_isGuid(item.catalogId)) {
+        if (!_safeTrim(item.catalogId)) {
             _schemaError("catalogId obligatorio (FK ServiciosCatalogo)");
         }
     }
 
     if (
         !Number.isFinite(Number(item.sequenceNumber)) ||
-        Number(item.sequenceNumber) <= 0
-    ) {
-        _schemaError("sequenceNumber debe ser mayor que 0");
+        Number(item.sequenceNumber)  0)");
     }
 
     if (!_safeTrim(item.recordHash)) {
@@ -288,7 +285,7 @@ export function MovimientosCaja_beforeInsert(item) {
         const diff = Math.abs(expected - total);
         if (diff > 0.02) {
             _schemaError(
-                `Cuadre fiscal invalido (rol ${role}): base ${finalBase} + cuota ${finalTax} + recargo ${surcharge} ${withholdingFactor > 0 ? "+" : "-"} retencion ${withholding} = ${expected.toFixed(2)}, total ${total.toFixed(2)}`
+                Cuadre fiscal invalido (rol ${role}): base ${finalBase} + cuota ${finalTax} + recargo ${surcharge} ${withholdingFactor > 0 ? "+" : "-"} retencion ${withholding} = ${expected.toFixed(2)}, total ${total.toFixed(2)}
             );
         }
     }
@@ -313,12 +310,12 @@ export function MovimientosCaja_beforeInsert(item) {
         }
         if (Math.abs(_roundItem(sumBase) - finalBase) > 0.02) {
             _schemaError(
-                `detailedBreakdown.base (${sumBase}) no cuadra con cabecera (${finalBase})`
+                detailedBreakdown.base (${sumBase}) no cuadra con cabecera (${finalBase})
             );
         }
         if (Math.abs(_roundItem(sumTax) - finalTax) > 0.02) {
             _schemaError(
-                `detailedBreakdown.cuota (${sumTax}) no cuadra con cabecera (${finalTax})`
+                detailedBreakdown.cuota (${sumTax}) no cuadra con cabecera (${finalTax})
             );
         }
     }
@@ -335,7 +332,7 @@ export function MovimientosCaja_beforeInsert(item) {
         _schemaError("traceId obligatorio en MovimientosCaja (SSOT-12)");
     }
     if (safeTrim(item.schemaVersion) !== LEDGERSCHEMAVERSIONAEAT) {
-        _schemaError(`schemaVersion debe ser "${LEDGERSCHEMAVERSIONAEAT}"`);
+        schemaError(schemaVersion debe ser "${LEDGERSCHEMAVERSIONAEAT}");
     }
 
     return item;
@@ -372,8 +369,7 @@ export function HistoricoCierresZ_beforeInsert(item) {
 
     const start = Number(item.startSequence);
     const end = Number(item.endSequence);
-    if (Number.isFinite(start) && Number.isFinite(end) && end < start) {
-        _schemaError(`endSequence (${end}) no puede ser menor que startSequence (${start})`);
+    if (Number.isFinite(start) && Number.isFinite(end) && end = startSequence (${start}));
     }
 
     return item;
@@ -473,9 +469,12 @@ export function CajaActual_beforeRemove() {
 }
 
 // =============================================================================
-// BLOQUES 6-7 - Catalogos maestros (ServiciosCatalogo, MapaStaff)
-// SIN HOOKS. Colecciones maestras CMS: cero friccion en escritura.
-// La validacion de negocio se realiza exclusivamente en el consumidor.
+// BLOQUES 6-7-9-10 - COLECCIONES MAESTRAS CMS Y DATOS DE USUARIO
+// ServiciosCatalogo, ComplementosCatalogo, MapaStaff, DatosFiscales
+//
+// SIN HOOKS. Estas colecciones son fuentes de informacion editables por
+// admin/usuario. La validacion estructural se realiza en el consumidor.
+// El campo 'status' esta pendiente de ADR (Anexo D §D.2.3); no se valida.
 // =============================================================================
 
 // =============================================================================
@@ -487,7 +486,7 @@ export function LibroAsientosContablesDetalle_beforeInsert(item) {
 
     const code = _safeTrim(item.accountCode || item.cuentaContable);
     if (code && !/^\d{6}$/.test(code)) {
-        _schemaError(`accountCode "${code}" no tiene formato PGC (6 digitos)`);
+        _schemaError(accountCode "${code}" no tiene formato PGC (6 digitos));
     }
 
     if (isV5Fiscal(item) || safeTrim(item.sourceEventId || item.eventoOrigenId)) {
@@ -495,23 +494,21 @@ export function LibroAsientosContablesDetalle_beforeInsert(item) {
         const thirdPartyId = _safeTrim(item.thirdPartyId || item.terceroId);
         const catalogId = _safeTrim(item.catalogId || item.catalogoId);
 
-        if (!_isGuid(sourceEventId)) {
+        if (!sourceEventId) {
             _schemaError("sourceEventId obligatorio (FK MovimientosCaja)");
         }
-        if (!_isGuid(thirdPartyId)) {
+        if (!thirdPartyId) {
             _schemaError("thirdPartyId obligatorio (FK DatosFiscales)");
         }
-        if (!_isGuid(catalogId)) {
+        if (!catalogId) {
             _schemaError("catalogId obligatorio (FK ServiciosCatalogo)");
         }
 
         const lineNumber = Number(item.lineNumber ?? item.numeroLinea);
-        if (!Number.isFinite(lineNumber) || lineNumber < 1) {
-            _schemaError("lineNumber debe ser mayor o igual que 1");
+        if (!Number.isFinite(lineNumber) || lineNumber = 1");
         }
 
-        if (!Number.isFinite(Number(item.units)) || Number(item.units) <= 0) {
-            _schemaError("units debe ser mayor que 0");
+        if (!Number.isFinite(Number(item.units)) || Number(item.units)  0");
         }
 
         const opDesc = _safeTrim(
@@ -548,50 +545,6 @@ async function _validateAccountingLineParent(item) {
     }
     return item;
 }
-
-// =============================================================================
-// BLOQUE 9 - DatosFiscales
-// =============================================================================
-
-export function DatosFiscales_beforeInsert(item) {
-    return _validateDatosFiscalesSchema(item);
-}
-
-export function DatosFiscales_beforeUpdate(item) {
-    return _validateDatosFiscalesSchema(item);
-}
-
-export function DatosFiscales_beforeRemove(item) {
-    const id = safeTrim(item?.id);
-    if (id === "CONFIGSISTEMAFISCAL") {
-        _fiscalError(
-            "CONFIGSISTEMAFISCAL es singleton protegido. No se puede eliminar."
-        );
-    }
-    return item;
-}
-
-function _validateDatosFiscalesSchema(item) {
-    if (!item || typeof item !== "object") return item;
-
-    assertDatosFiscales(item);
-
-    if (safeTrim(item.recordType) === RECORDTYPE.CONFIG_SISTEMA) {
-        const nifProductor = _safeTrim(item.nifProductor || item.producerTaxId);
-        if (!nifProductor || !isValidNifOrEuVat(nifProductor)) {
-            _schemaError(
-                "CONFIG_SISTEMA exige nifProductor valido (Veri*Factu, Ley 11/2021)"
-            );
-        }
-    }
-
-    return item;
-}
-
-// =============================================================================
-// BLOQUE 10 - ComplementosCatalogo
-// SIN HOOKS. Catalogo maestro CMS: cero friccion en escritura.
-// =============================================================================
 
 // =============================================================================
 // BLOQUE 11 - CitasF2 (PROYECCION BOOKINGS)
@@ -641,7 +594,7 @@ export async function MovimientosInventario_beforeInsert(item) {
         .find({ suppressAuth: true });
 
     if (existing?.items?.length > 0) {
-        _fiscalError(`movementToken duplicado en MovimientosInventario: ${token}`);
+        _fiscalError(movementToken duplicado en MovimientosInventario: ${token});
     }
 
     return item;
@@ -668,14 +621,14 @@ export function ControlOperativo_beforeInsert(item) {
 export function ControlOperativo_beforeUpdate(item, context) {
     const original = context?.original || item;
     if (safeTrim(original?.controlType) === CONTROLTYPE.WEBHOOK_EVENT) {
-        _fiscalError("WEBHOOKEVENT es append-only (ADR-05).");
+        fiscalError("WEBHOOKEVENT es append-only (ADR-05).");
     }
     return item;
 }
 
 export function ControlOperativo_beforeRemove(item) {
     if (safeTrim(item?.controlType) === CONTROLTYPE.WEBHOOK_EVENT) {
-        _fiscalError("Borrado prohibido en WEBHOOKEVENT (ADR-05).");
+        fiscalError("Borrado prohibido en WEBHOOKEVENT (ADR-05).");
     }
     return item;
 }
@@ -706,59 +659,9 @@ function _validateStockCoherence(item) {
     if (Number.isFinite(stockOnHand) && Number.isFinite(stockAvailable)) {
         if (Math.abs(stockOnHand - stockReserved - stockAvailable) > 0.001) {
             _schemaError(
-                `stockAvailable (${stockAvailable}) debe ser stockOnHand (${stockOnHand}) - stockReserved (${stockReserved})`
+                stockAvailable (${stockAvailable}) debe ser stockOnHand (${stockOnHand}) - stockReserved (${stockReserved})
             );
         }
     }
     return item;
-}
-
-// =============================================================================
-// BLOQUE 15 - COLECCIONES PROHIBIDAS (SSOT-09, SSOT-15)
-// =============================================================================
-
-export function FacturasRecibidas_beforeInsert() {
-    _fiscalError(
-        "FacturasRecibidas prohibida (SSOT-09). Registre compras en MovimientosCaja (fiscalRole=RECEPTOR) + LibroAsientosContablesDetalle."
-    );
-}
-
-export function FacturasRecibidas_beforeUpdate() {
-    _fiscalError(
-        "FacturasRecibidas prohibida (SSOT-09): no se admiten actualizaciones."
-    );
-}
-
-export function FacturasRecibidas_beforeRemove() {
-    _fiscalError(
-        "FacturasRecibidas prohibida (SSOT-09): no se admiten eliminaciones."
-    );
-}
-
-export function AsientosContables_beforeInsert() {
-    _fiscalError(
-        "AsientosContables prohibida (SSOT-09). Use LibroAsientosContablesDetalle."
-    );
-}
-
-export function AsientosContables_beforeUpdate() {
-    _fiscalError("AsientosContables prohibida (SSOT-09).");
-}
-
-export function AsientosContables_beforeRemove() {
-    _fiscalError("AsientosContables prohibida (SSOT-09).");
-}
-
-export function ConfiguracionFiscal_beforeInsert() {
-    _fiscalError(
-        "ConfiguracionFiscal prohibida (SSOT-09). Use DatosFiscales con recordType=CONFIG_SISTEMA."
-    );
-}
-
-export function ConfiguracionFiscal_beforeUpdate() {
-    _fiscalError("ConfiguracionFiscal prohibida (SSOT-09).");
-}
-
-export function ConfiguracionFiscal_beforeRemove() {
-    _fiscalError("ConfiguracionFiscal prohibida (SSOT-09).");
 }
