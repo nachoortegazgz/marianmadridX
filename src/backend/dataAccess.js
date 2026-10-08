@@ -1,51 +1,41 @@
 /*
 =============================================================================
 MODULE: backend/dataAccess.js
-VERSION: v9.0.1-SDKV2-ZERO-LEGACY (corregido contra contrato REAL del SDK)
-BASE: BIBLIA v8.0-SSOT-MASTER + ANEXO SSOT v8.1 + analisis-sdkv2
-      (repo marianmadridX, rama main, commit b7effa3d)
+VERSION: v10.0-SSOT-FRICTIONLESS
+BASE: BIBLIA SSOT v9.1 + Anexo D + analisis-sdkv2 (commit b7effa3d)
 RESPONSIBILITY: Capa unica de acceso a datos (DAL) del backend de reservas.
   Contrato unico: @wix/data (namespace items) + @wix/essentials (auth.elevate).
 STANDARDS: G10 ASCII estricto. Sin console.log directo (logger SSOT).
 REEMPLAZA Y ELIMINA: backend/dataClient.js (fachada legacy wix-data).
 
-CORRECCIONES APLICADAS SOBRE EL BORRADOR ANTERIOR DE ESTE MODULO (verificado
-contra la documentacion oficial dev.wix.com, 2026-10; ver auditoria):
-  C1. items.count NO EXISTE como metodo de @wix/data (solo existen query,
-      get, insert, update, save, remove, queryReferencedItems). El borrador
-      anterior hacia auth.elevate(items.count) en codigo de nivel superior,
-      lo que rompe la carga del modulo para TODO consumidor (staff.js
-      incluido). countItems() se reimplementa sobre query() con
-      returnTotalCount: true (unica via real de conteo del SDK).
+CORRECCIONES APLICADAS (verificadas contra dev.wix.com, 2026-10):
+  C1. items.count NO EXISTE en @wix/data. countItems() se reimplementa sobre
+      query() con returnTotalCount: true y limit: 1.
   C2. ARIDAD REAL: get/insert/update/save/remove/query se invocan con TRES
-      argumentos posicionales -- items.<op>(dataCollectionId, payload,
-      options) -- NUNCA fusionando dataCollectionId dentro del objeto de
-      payload u opciones. El borrador anterior invertia el orden
-      (payload primero, dataCollectionId dentro de options).
+      argumentos posicionales (dataCollectionId, payload, options).
   C3. queryReferencedItems tiene 4 argumentos posicionales reales:
-      items.queryReferencedItems(dataCollectionId, referringItem, field,
-      options). El borrador anterior lo llamaba con 3 argumentos y forma
-      incorrecta.
-  C4. query.filter es un OBJETO (estilo MongoQL: $eq/$ne/$gt/$gte/$lt/$lte/
-      $in/$nin/$startsWith/$isEmpty/$exists/$hasAll/$hasSome + logicos
-      $and/$or/$not). "$contains" NO es un operador documentado de la Wix
-      API Query Language: wql.contains() se reimplementa sobre
-      "$startsWith" (coincide solo PREFIJOS; ver limitacion en cabecera de
-      dataClient.js) en vez de un operador inexistente que la API
-      rechazaria en tiempo de ejecucion.
-  C5. El campo real de conteo en la respuesta es pagingMetadata.total (no
-      "totalCount"). queryItems/countItems leian un campo que no existe y
-      devolvian siempre null/0.
-  C6. wql.byId usaba el campo "dataItemField._id", que no aparece en ningun
-      ejemplo oficial (los filtros referencian "_id" a secas). Corregido a
-      "_id".
-  C7. consistentRead (booleano) es la opcion real; no existe un enum
-      "consistency" STRONG/EVENTUAL en el contrato de items.*. CONSISTENCY
-      se mantiene como constante de conveniencia interna de este DAL, pero
-      se traduce a { consistentRead: true } al llamar al SDK.
+      (dataCollectionId, referringItem, field, options).
+  C4. query.filter es OBJETO MongoQL ($eq/$ne/$gt/$gte/$lt/$lte/$in/$nin/
+      $startsWith/$isEmpty/$exists/$hasAll/$hasSome + $and/$or/$not).
+      "$contains" NO existe; startsWith solo coincide PREFIJOS.
+  C5. Campo real de conteo: pagingMetadata.total (no "totalCount").
+  C6. Filtros referencian "_id" a secas (no "dataItemField._id").
+  C7. consistentRead (boolean) es la opcion real; no existe enum "consistency".
+
+REGLAS DE MIGRACION (analisis-sdkv2.txt / seguro-migrar.txt):
+  R1. suppressAuth NO es opcion valida del SDK v2. El privilegio se construye
+      elevando la OPERACION con auth.elevate.
+  R2. suppressHooks NO se expone: los hooks de backend/data.js se ejecutan
+      SIEMPRE (SSOT-14). Toda escritura debe ser canonica y valida.
+  R3. Lectura fuerte se preserva con consistentRead: true.
+  R4. Filtros por OBJETO nativo SDK v2. Cero builder legacy, cero WQL string.
+  R5. Toda operacion es ELEVADA (identidad de sistema). Colecciones activas
+      son Admin-only; webMethods publicos no tienen sesion CMS.
+  R6. Normalizacion de frontera: SDK v2 puede devolver 'id'. Este DAL expone
+      SIEMPRE '_id' como identificador canonico interno.
 
 ORDEN DE ENTREGA DE LA MIGRACION (9 modulos, dominio reservas online):
-  1/9 backend/dataAccess.js            <- ESTE MODULO (sustituye dataClient.js)
+  1/9 backend/dataAccess.js            <- ESTE MODULO
   2/9 backend/internalConfig.js
   3/9 backend/validation.js
   4/9 backend/staff.js
@@ -54,31 +44,6 @@ ORDEN DE ENTREGA DE LA MIGRACION (9 modulos, dominio reservas online):
   7/9 backend/booking/bookingSaga.js
   8/9 backend/reservas.web.js
   9/9 backend/citasManager.web.js
-
-REGLAS DE MIGRACION APLICADAS (analisis-sdkv2.txt / seguro-migrar.txt):
-  R1. suppressAuth NO es una opcion valida del SDK v2 instalado. El privilegio
-      se construye elevando la OPERACION con auth.elevate, nunca propagando
-      opciones legacy en el objeto de opciones.
-  R2. suppressHooks NO existe conceptualmente para este DAL: los hooks de
-      backend/data.js se ejecutan SIEMPRE (SSOT-14). Ninguna escritura
-      puede depender de saltarlos; toda escritura del backend debe ser
-      canonica y valida. (suppressHooks SI es una opcion real del SDK si
-      algun consumidor excepcional la necesitase explicitamente, pero este
-      DAL no la expone por defecto.)
-  R3. La lectura fuerte (mutex, transacciones, secuencias, idempotencia) se
-      preserva con consistentRead: true, unica ruta verificada del DAL.
-  R4. Filtros por OBJETO nativo del SDK v2 ($eq/$ne/$gt/$gte/$lt/$lte/$in/
-      $hasSome/$startsWith/$and/$or). Cero builder legacy, cero
-      concatenacion de strings WQL.
-  R5. Toda operacion de este DAL es ELEVADA (identidad de sistema): las
-      colecciones activas son Admin-only y los webMethods publicos
-      (Permissions.Anyone) no tienen sesion con permisos de CMS. Un handler
-      que deba operar con identidad del miembro importa { items } de
-      '@wix/data' directamente; no usa este DAL.
-  R6. Normalizacion de frontera: el SDK v2 puede devolver el identificador
-      como 'id'. Este DAL expone SIEMPRE '_id' como identificador canonico
-      interno (unica forma; no es un alias de negocio, es normalizacion de
-      respuesta del SDK en la frontera DAL).
 =============================================================================
 */
 
@@ -89,19 +54,17 @@ import { logger } from "backend/logger";
 const log = logger;
 
 // =============================================================================
-// BLOQUE 1 - OPERACIONES ELEVADAS (elevacion unica, referencias estables)
+// BLOQUE 1 - OPERACIONES ELEVADAS
 // =============================================================================
-// Solo se elevan metodos que REALMENTE existen en @wix/data. "items.count"
-// no es un metodo del SDK (ver C1) y se ha eliminado de este bloque.
 
 const elevated = Object.freeze({
-  get: auth.elevate(items.get),
-  insert: auth.elevate(items.insert),
-  update: auth.elevate(items.update),
-  save: auth.elevate(items.save),
-  remove: auth.elevate(items.remove),
-  query: auth.elevate(items.query),
-  queryReferencedItems: auth.elevate(items.queryReferencedItems),
+    get: auth.elevate(items.get),
+    insert: auth.elevate(items.insert),
+    update: auth.elevate(items.update),
+    save: auth.elevate(items.save),
+    remove: auth.elevate(items.remove),
+    query: auth.elevate(items.query),
+    queryReferencedItems: auth.elevate(items.queryReferencedItems),
 });
 
 // =============================================================================
@@ -109,8 +72,8 @@ const elevated = Object.freeze({
 // =============================================================================
 
 export const CONSISTENCY = Object.freeze({
-  STRONG: "STRONG",
-  EVENTUAL: "EVENTUAL",
+    STRONG: "STRONG",
+    EVENTUAL: "EVENTUAL",
 });
 
 const MAX_PAGE_SIZE = 1000;
@@ -123,61 +86,57 @@ const QUERY_ALL_DEFAULT_MAX_PAGES = 50;
 // =============================================================================
 
 function _requireCollectionId(dataCollectionId) {
-  const id =
-    typeof dataCollectionId === "string" ? dataCollectionId.trim() : "";
-  if (!id) {
-    throw new Error("DAL_INVALID_COLLECTION: dataCollectionId es obligatorio");
-  }
-  return id;
+    const id =
+        typeof dataCollectionId === "string" ? dataCollectionId.trim() : "";
+    if (!id) {
+        throw new Error("DAL_INVALID_COLLECTION: dataCollectionId es obligatorio");
+    }
+    return id;
 }
 
 function _requireItemId(itemId) {
-  const id = typeof itemId === "string" ? itemId.trim() : "";
-  if (!id) {
-    throw new Error("DAL_INVALID_ITEM_ID: itemId es obligatorio");
-  }
-  return id;
+    const id = typeof itemId === "string" ? itemId.trim() : "";
+    if (!id) {
+        throw new Error("DAL_INVALID_ITEM_ID: itemId es obligatorio");
+    }
+    return id;
 }
 
 function _requireItemObject(item) {
-  if (!item || typeof item !== "object" || Array.isArray(item)) {
-    throw new Error("DAL_INVALID_ITEM: item debe ser un objeto");
-  }
-  return item;
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+        throw new Error("DAL_INVALID_ITEM: item debe ser un objeto");
+    }
+    return item;
 }
 
 function _isStrongRead(options) {
-  return Boolean(options && options.consistency === CONSISTENCY.STRONG);
+    return Boolean(options && options.consistency === CONSISTENCY.STRONG);
 }
 
-// Traduce la constante interna CONSISTENCY a la opcion real del SDK v2
-// (consistentRead: boolean). No existe un enum "consistency" en el SDK.
 function _sdkOptionsFor(options) {
-  const sdk = {};
-  if (_isStrongRead(options)) sdk.consistentRead = true;
-  return sdk;
+    const sdk = {};
+    if (_isStrongRead(options)) sdk.consistentRead = true;
+    return sdk;
 }
 
 function _buildPaging(limit, offset) {
-  const safeLimit = Math.min(
-    Math.max(Number(limit) || DEFAULT_PAGE_SIZE, 1),
-    MAX_PAGE_SIZE
-  );
-  const safeOffset = Math.max(Number(offset) || 0, 0);
-  return { limit: safeLimit, offset: safeOffset };
+    const safeLimit = Math.min(
+        Math.max(Number(limit) || DEFAULT_PAGE_SIZE, 1),
+        MAX_PAGE_SIZE
+    );
+    const safeOffset = Math.max(Number(offset) || 0, 0);
+    return { limit: safeLimit, offset: safeOffset };
 }
 
-// queryRequest real del SDK v2: { filter?, sort?, fields?, paging|cursorPaging }
-// -- SIN dataCollectionId dentro (va como primer argumento posicional).
 function _buildQueryRequest(queryFilter, querySort, limit, offset) {
-  const queryRequest = { paging: _buildPaging(limit, offset) };
-  if (queryFilter && typeof queryFilter === "object") {
-    queryRequest.filter = queryFilter;
-  }
-  if (Array.isArray(querySort) && querySort.length > 0) {
-    queryRequest.sort = querySort;
-  }
-  return queryRequest;
+    const queryRequest = { paging: _buildPaging(limit, offset) };
+    if (queryFilter && typeof queryFilter === "object") {
+        queryRequest.filter = queryFilter;
+    }
+    if (Array.isArray(querySort) && querySort.length > 0) {
+        queryRequest.sort = querySort;
+    }
+    return queryRequest;
 }
 
 /**
@@ -185,132 +144,127 @@ function _buildQueryRequest(queryFilter, querySort, limit, offset) {
  * El identificador canonico interno del backend es '_id'.
  */
 function _normalizeItem(item) {
-  if (!item || typeof item !== "object") return item;
-  if (item._id === undefined && item.id !== undefined) {
-    return Object.assign({}, item, { _id: item.id });
-  }
-  return item;
+    if (!item || typeof item !== "object") return item;
+    if (item._id === undefined && item.id !== undefined) {
+        return Object.assign({}, item, { _id: item.id });
+    }
+    return item;
 }
 
 function _normalizeItemList(list) {
-  return Array.isArray(list) ? list.map(_normalizeItem) : [];
+    return Array.isArray(list) ? list.map(_normalizeItem) : [];
 }
 
 function _safeName(dataCollectionId) {
-  return typeof dataCollectionId === "string" ? dataCollectionId : "UNKNOWN";
+    return typeof dataCollectionId === "string" ? dataCollectionId : "UNKNOWN";
 }
 
 // =============================================================================
 // BLOQUE 4 - CONSTRUCTORES DE FILTRO Y ORDEN (objeto nativo SDK v2)
 // =============================================================================
-// Operadores verificados contra "About the Wix API Query Language":
-// $eq, $ne, $gt, $gte, $lt, $lte, $in, $nin, $startsWith, $isEmpty, $exists,
-// $hasAll, $hasSome, mas los logicos $and / $or / $not. NO existe "$contains".
+// Operadores verificados: $eq, $ne, $gt, $gte, $lt, $lte, $in, $nin,
+// $startsWith, $isEmpty, $exists, $hasAll, $hasSome, $and, $or, $not.
+// NO existe "$contains".
 
 export const wql = Object.freeze({
-  byId: (value) => ({ "_id": { $eq: String(value) } }),
-  eq: (field, value) => ({ [String(field)]: { $eq: value } }),
-  ne: (field, value) => ({ [String(field)]: { $ne: value } }),
-  gt: (field, value) => ({ [String(field)]: { $gt: value } }),
-  gte: (field, value) => ({ [String(field)]: { $gte: value } }),
-  lt: (field, value) => ({ [String(field)]: { $lt: value } }),
-  lte: (field, value) => ({ [String(field)]: { $lte: value } }),
-  in: (field, values) => ({
-    [String(field)]: { $in: Array.from(values || []) },
-  }),
-  hasSome: (field, values) => ({
-    [String(field)]: { $hasSome: Array.from(values || []) },
-  }),
-  // LIMITACION: la API Query Language publica no documenta un operador de
-  // subcadena generico. $startsWith es el operador real mas cercano, pero
-  // solo coincide PREFIJOS, no subcadenas en posicion arbitraria. Revisar
-  // caso a caso los call-sites que dependan de "contiene en cualquier
-  // posicion" (ver auditoria dataClient.js).
-  startsWith: (field, value) => ({
-    [String(field)]: { $startsWith: value },
-  }),
-  and: (...clauses) => ({
-    $and: clauses.filter((clause) => clause && typeof clause === "object"),
-  }),
-  or: (...clauses) => ({
-    $or: clauses.filter((clause) => clause && typeof clause === "object"),
-  }),
+    byId: (value) => ({ _id: { $eq: String(value) } }),
+    eq: (field, value) => ({ [String(field)]: { $eq: value } }),
+    ne: (field, value) => ({ [String(field)]: { $ne: value } }),
+    gt: (field, value) => ({ [String(field)]: { $gt: value } }),
+    gte: (field, value) => ({ [String(field)]: { $gte: value } }),
+    lt: (field, value) => ({ [String(field)]: { $lt: value } }),
+    lte: (field, value) => ({ [String(field)]: { $lte: value } }),
+    in: (field, values) => ({
+        [String(field)]: { $in: Array.from(values || []) },
+    }),
+    hasSome: (field, values) => ({
+        [String(field)]: { $hasSome: Array.from(values || []) },
+    }),
+    // LIMITACION: $startsWith solo coincide PREFIJOS, no subcadenas
+    // en posicion arbitraria. No existe operador de substring generico.
+    startsWith: (field, value) => ({
+        [String(field)]: { $startsWith: value },
+    }),
+    and: (...clauses) => ({
+        $and: clauses.filter((clause) => clause && typeof clause === "object"),
+    }),
+    or: (...clauses) => ({
+        $or: clauses.filter((clause) => clause && typeof clause === "object"),
+    }),
 });
 
 export const order = Object.freeze({
-  asc: (fieldName) => [{ fieldName: String(fieldName), order: "ASC" }],
-  desc: (fieldName) => [{ fieldName: String(fieldName), order: "DESC" }],
-  by: (...specs) =>
-    specs
-      .map((spec) =>
-        spec && typeof spec === "object" && spec.fieldName
-          ? {
-              fieldName: String(spec.fieldName),
-              order: String(spec.order || "ASC").toUpperCase() === "DESC"
-                ? "DESC"
-                : "ASC",
-            }
-          : null
-      )
-      .filter(Boolean),
+    asc: (fieldName) => [{ fieldName: String(fieldName), order: "ASC" }],
+    desc: (fieldName) => [{ fieldName: String(fieldName), order: "DESC" }],
+    by: (...specs) =>
+        specs
+            .map((spec) =>
+                spec && typeof spec === "object" && spec.fieldName
+                    ? {
+                          fieldName: String(spec.fieldName),
+                          order:
+                              String(spec.order || "ASC").toUpperCase() === "DESC"
+                                  ? "DESC"
+                                  : "ASC",
+                      }
+                    : null
+            )
+            .filter(Boolean),
 });
 
 // =============================================================================
 // BLOQUE 5 - CLASIFICACION DE ERRORES DEL SDK
 // =============================================================================
-// NOTA: los codigos WDE0111/WDE0123 no estan confirmados contra la
-// documentacion oficial de codigos de error; se conservan como heuristica
-// adicional junto a httpCode/mensaje, que son las senales verificables.
 
 export function isNotFoundError(error) {
-  const appError = error?.details?.applicationError || {};
-  const code = String(appError.code || error?.code || "").toUpperCase();
-  const message = String(error?.message || "").toUpperCase();
-  const httpCode = Number(
-    appError.httpCode || error?.httpCode || error?.status || 0
-  );
-  return (
-    httpCode === 404 ||
-    code === "WDE0111" ||
-    code.includes("NOT_FOUND") ||
-    message.includes("WDE0111") ||
-    message.includes("NOT_FOUND") ||
-    message.includes("NOT FOUND")
-  );
+    const appError = error?.details?.applicationError || {};
+    const code = String(appError.code || error?.code || "").toUpperCase();
+    const message = String(error?.message || "").toUpperCase();
+    const httpCode = Number(
+        appError.httpCode || error?.httpCode || error?.status || 0
+    );
+    return (
+        httpCode === 404 ||
+        code === "WDE0111" ||
+        code.includes("NOT_FOUND") ||
+        message.includes("WDE0111") ||
+        message.includes("NOT_FOUND") ||
+        message.includes("NOT FOUND")
+    );
 }
 
 export function isDuplicateKeyError(error) {
-  const appError = error?.details?.applicationError || {};
-  const code = String(appError.code || error?.code || "").toUpperCase();
-  const message = String(error?.message || "").toUpperCase();
-  return (
-    code === "WDE0123" ||
-    code.includes("DUPLICATE") ||
-    message.includes("WDE0123") ||
-    message.includes("DUPLICATE") ||
-    message.includes("ALREADY EXISTS")
-  );
+    const appError = error?.details?.applicationError || {};
+    const code = String(appError.code || error?.code || "").toUpperCase();
+    const message = String(error?.message || "").toUpperCase();
+    return (
+        code === "WDE0123" ||
+        code.includes("DUPLICATE") ||
+        message.includes("WDE0123") ||
+        message.includes("DUPLICATE") ||
+        message.includes("ALREADY EXISTS")
+    );
 }
 
 // =============================================================================
-// BLOQUE 6 - CRUD ELEVADO (contrato unico del backend de reservas)
+// BLOQUE 6 - CRUD ELEVADO
 // =============================================================================
 
 /**
  * Lectura de un item por id.
  * @param {string} dataCollectionId coleccion CMS canonica (SSOT-02)
  * @param {string} itemId
- * @param {{consistency?: string}} [options] consistency: CONSISTENCY.STRONG
- *        para lecturas criticas (mutex, secuencias, idempotencia).
+ * @param {{consistency?: string}} [options] CONSISTENCY.STRONG para lecturas
+ *        criticas (mutex, secuencias, idempotencia).
  * @returns {Promise<Object>} item con '_id' canonico.
  */
 export async function getItem(dataCollectionId, itemId, options = {}) {
-  const res = await elevated.get(
-    _requireCollectionId(dataCollectionId),
-    _requireItemId(itemId),
-    _sdkOptionsFor(options)
-  );
-  return _normalizeItem(res);
+    const res = await elevated.get(
+        _requireCollectionId(dataCollectionId),
+        _requireItemId(itemId),
+        _sdkOptionsFor(options)
+    );
+    return _normalizeItem(res);
 }
 
 /**
@@ -318,24 +272,24 @@ export async function getItem(dataCollectionId, itemId, options = {}) {
  * otro error. Sustituye el patron legacy '.catch(() => null)'.
  */
 export async function getItemOrNull(dataCollectionId, itemId, options = {}) {
-  try {
-    return await getItem(dataCollectionId, itemId, options);
-  } catch (error) {
-    if (isNotFoundError(error)) return null;
-    throw error;
-  }
+    try {
+        return await getItem(dataCollectionId, itemId, options);
+    } catch (error) {
+        if (isNotFoundError(error)) return null;
+        throw error;
+    }
 }
 
 /**
  * Insercion. Los hooks beforeInsert de data.js SE EJECUTAN (R2/SSOT-14).
  */
 export async function insertItem(dataCollectionId, item) {
-  const res = await elevated.insert(
-    _requireCollectionId(dataCollectionId),
-    _requireItemObject(item),
-    {}
-  );
-  return _normalizeItem(res);
+    const res = await elevated.insert(
+        _requireCollectionId(dataCollectionId),
+        _requireItemObject(item),
+        {}
+    );
+    return _normalizeItem(res);
 }
 
 /**
@@ -343,30 +297,30 @@ export async function insertItem(dataCollectionId, item) {
  * Los hooks beforeUpdate de data.js SE EJECUTAN (R2/SSOT-14).
  */
 export async function updateItem(dataCollectionId, item) {
-  const doc = _requireItemObject(item);
-  if (doc._id === undefined && doc.id === undefined) {
-    throw new Error("DAL_INVALID_ITEM: update requiere _id");
-  }
-  const payload =
-    doc._id === undefined ? Object.assign({}, doc, { _id: doc.id }) : doc;
-  const res = await elevated.update(
-    _requireCollectionId(dataCollectionId),
-    payload,
-    {}
-  );
-  return _normalizeItem(res);
+    const doc = _requireItemObject(item);
+    if (doc._id === undefined && doc.id === undefined) {
+        throw new Error("DAL_INVALID_ITEM: update requiere _id");
+    }
+    const payload =
+        doc._id === undefined ? Object.assign({}, doc, { _id: doc.id }) : doc;
+    const res = await elevated.update(
+        _requireCollectionId(dataCollectionId),
+        payload,
+        {}
+    );
+    return _normalizeItem(res);
 }
 
 /**
  * Upsert: inserta si no existe, actualiza si existe (por _id).
  */
 export async function saveItem(dataCollectionId, item) {
-  const res = await elevated.save(
-    _requireCollectionId(dataCollectionId),
-    _requireItemObject(item),
-    {}
-  );
-  return _normalizeItem(res);
+    const res = await elevated.save(
+        _requireCollectionId(dataCollectionId),
+        _requireItemObject(item),
+        {}
+    );
+    return _normalizeItem(res);
 }
 
 /**
@@ -374,24 +328,24 @@ export async function saveItem(dataCollectionId, item) {
  * append-only rechazaran la operacion por normativa (SSOT-05).
  */
 export async function removeItem(dataCollectionId, itemId) {
-  await elevated.remove(
-    _requireCollectionId(dataCollectionId),
-    _requireItemId(itemId),
-    {}
-  );
+    await elevated.remove(
+        _requireCollectionId(dataCollectionId),
+        _requireItemId(itemId),
+        {}
+    );
 }
 
 /**
  * Borrado tolerante: no relanza si el item ya no existe (idempotente).
  */
 export async function removeItemIfPresent(dataCollectionId, itemId) {
-  try {
-    await removeItem(dataCollectionId, itemId);
-    return true;
-  } catch (error) {
-    if (isNotFoundError(error)) return false;
-    throw error;
-  }
+    try {
+        await removeItem(dataCollectionId, itemId);
+        return true;
+    } catch (error) {
+        if (isNotFoundError(error)) return false;
+        throw error;
+    }
 }
 
 /**
@@ -406,44 +360,43 @@ export async function removeItemIfPresent(dataCollectionId, itemId) {
  * @returns {Promise<{items: Array, totalCount: number|null, pagingMetadata: Object|null}>}
  */
 export async function queryItems(params = {}) {
-  const {
-    dataCollectionId,
-    filter: queryFilter,
-    sort: querySort,
-    limit,
-    offset,
-    consistency,
-  } = params;
-  const queryRequest = _buildQueryRequest(queryFilter, querySort, limit, offset);
-  const sdkOpts = Object.assign(
-    { returnTotalCount: true },
-    consistency === CONSISTENCY.STRONG ? { consistentRead: true } : {}
-  );
-  const res = await elevated.query(
-    _requireCollectionId(dataCollectionId),
-    queryRequest,
-    sdkOpts
-  );
-  const meta = res?.pagingMetadata || null;
-  const list = _normalizeItemList(res?.items);
-  // Campo real de la respuesta: pagingMetadata.total (no "totalCount").
-  const rawTotal = Number(meta?.total);
-  return {
-    items: list,
-    totalCount: Number.isFinite(rawTotal) ? rawTotal : null,
-    pagingMetadata: meta,
-  };
+    const {
+        dataCollectionId,
+        filter: queryFilter,
+        sort: querySort,
+        limit,
+        offset,
+        consistency,
+    } = params;
+    const queryRequest = _buildQueryRequest(queryFilter, querySort, limit, offset);
+    const sdkOpts = Object.assign(
+        { returnTotalCount: true },
+        consistency === CONSISTENCY.STRONG ? { consistentRead: true } : {}
+    );
+    const res = await elevated.query(
+        _requireCollectionId(dataCollectionId),
+        queryRequest,
+        sdkOpts
+    );
+    const meta = res?.pagingMetadata || null;
+    const list = _normalizeItemList(res?.items);
+    const rawTotal = Number(meta?.total);
+    return {
+        items: list,
+        totalCount: Number.isFinite(rawTotal) ? rawTotal : null,
+        pagingMetadata: meta,
+    };
 }
 
 /**
- * Query de una pagina que devuelve el primer item o null.
+ * Query que devuelve el primer item o null.
  * Sustituye el patron legacy '.limit(1).find() -> items[0] || null'.
  */
 export async function queryFirstItem(params = {}) {
-  const res = await queryItems(
-    Object.assign({}, params, { limit: 1, offset: 0 })
-  );
-  return res.items.length > 0 ? res.items[0] : null;
+    const res = await queryItems(
+        Object.assign({}, params, { limit: 1, offset: 0 })
+    );
+    return res.items.length > 0 ? res.items[0] : null;
 }
 
 /**
@@ -451,61 +404,57 @@ export async function queryFirstItem(params = {}) {
  * @returns {Promise<Array>} todos los items hasta agotar o alcanzar maxPages.
  */
 export async function queryAllPages(params = {}) {
-  const {
-    dataCollectionId,
-    filter: queryFilter,
-    sort: querySort,
-    pageSize = QUERY_ALL_DEFAULT_PAGE_SIZE,
-    maxPages = QUERY_ALL_DEFAULT_MAX_PAGES,
-    consistency,
-    traceId = null,
-  } = params;
-  const size = Math.min(
-    Math.max(Number(pageSize) || QUERY_ALL_DEFAULT_PAGE_SIZE, 1),
-    MAX_PAGE_SIZE
-  );
-  const pages = Math.max(
-    Number(maxPages) || QUERY_ALL_DEFAULT_MAX_PAGES,
-    1
-  );
-  const all = [];
-  let offset = 0;
-  for (let page = 1; page <= pages; page += 1) {
-    const res = await queryItems({
-      dataCollectionId,
-      filter: queryFilter,
-      sort: querySort,
-      limit: size,
-      offset,
-      consistency,
-    });
-    all.push(...res.items);
-    if (res.items.length < size) return all;
-    offset += size;
-  }
-  log.warn(
-    "DAL_QUERY_ALL_PAGES_TRUNCATED: maxPages alcanzado sin agotar la consulta",
-    { dataCollectionId: _safeName(dataCollectionId), maxPages: pages, traceId }
-  );
-  return all;
+    const {
+        dataCollectionId,
+        filter: queryFilter,
+        sort: querySort,
+        pageSize = QUERY_ALL_DEFAULT_PAGE_SIZE,
+        maxPages = QUERY_ALL_DEFAULT_MAX_PAGES,
+        consistency,
+        traceId = null,
+    } = params;
+    const size = Math.min(
+        Math.max(Number(pageSize) || QUERY_ALL_DEFAULT_PAGE_SIZE, 1),
+        MAX_PAGE_SIZE
+    );
+    const pages = Math.max(Number(maxPages) || QUERY_ALL_DEFAULT_MAX_PAGES, 1);
+    const all = [];
+    let offset = 0;
+    for (let page = 1; page <= pages; page += 1) {
+        const res = await queryItems({
+            dataCollectionId,
+            filter: queryFilter,
+            sort: querySort,
+            limit: size,
+            offset,
+            consistency,
+        });
+        all.push(...res.items);
+        if (res.items.length < size) return all;
+        offset += size;
+    }
+    log.warn(
+        "DAL_QUERY_ALL_PAGES_TRUNCATED: maxPages alcanzado sin agotar la consulta",
+        { dataCollectionId: _safeName(dataCollectionId), maxPages: pages, traceId }
+    );
+    return all;
 }
 
 /**
  * Conteo con filtro opcional.
  * NOTA (C1): items.count no existe en el SDK; se implementa sobre query()
- * pidiendo returnTotalCount: true y paginando 1 solo item (minimiza payload
- * de transferencia manteniendo el total real en pagingMetadata.total).
+ * con returnTotalCount: true y limit: 1.
  */
 export async function countItems(params = {}) {
-  const { dataCollectionId, filter: queryFilter, consistency } = params;
-  const res = await queryItems({
-    dataCollectionId,
-    filter: queryFilter,
-    limit: 1,
-    offset: 0,
-    consistency,
-  });
-  return res.totalCount != null ? res.totalCount : 0;
+    const { dataCollectionId, filter: queryFilter, consistency } = params;
+    const res = await queryItems({
+        dataCollectionId,
+        filter: queryFilter,
+        limit: 1,
+        offset: 0,
+        consistency,
+    });
+    return res.totalCount != null ? res.totalCount : 0;
 }
 
 /**
@@ -515,32 +464,34 @@ export async function countItems(params = {}) {
  *          addOnOptions (ServiciosCatalogo -> ComplementosCatalogo).
  */
 export async function queryReferencedItems(
-  dataCollectionId,
-  itemId,
-  referenceFieldName,
-  options = {}
+    dataCollectionId,
+    itemId,
+    referenceFieldName,
+    options = {}
 ) {
-  const field = String(referenceFieldName || "").trim();
-  if (!field) {
-    throw new Error(
-      "DAL_INVALID_REFERENCE_FIELD: referenceFieldName es obligatorio"
+    const field = String(referenceFieldName || "").trim();
+    if (!field) {
+        throw new Error(
+            "DAL_INVALID_REFERENCE_FIELD: referenceFieldName es obligatorio"
+        );
+    }
+    // Firma real: items.queryReferencedItems(dataCollectionId, referringItem,
+    // field, options) -- 4 argumentos posicionales (ver C3).
+    const res = await elevated.queryReferencedItems(
+        _requireCollectionId(dataCollectionId),
+        _requireItemId(itemId),
+        field,
+        _sdkOptionsFor(options)
     );
-  }
-  // Firma real: items.queryReferencedItems(dataCollectionId, referringItem,
-  // field, options) -- 4 argumentos posicionales (ver C3).
-  const res = await elevated.queryReferencedItems(
-    _requireCollectionId(dataCollectionId),
-    _requireItemId(itemId),
-    field,
-    _sdkOptionsFor(options)
-  );
-  // La respuesta real trae "results" (items resueltos o unresolvedReference),
-  // no "items"; se filtra a los items efectivamente resueltos.
-  const results = Array.isArray(res?.results) ? res.results : [];
-  const resolved = results
-    .map((r) => (r && typeof r === "object" && !r.unresolvedReference ? r : null))
-    .filter(Boolean);
-  return _normalizeItemList(resolved);
+    // La respuesta trae "results" (items resueltos o unresolvedReference);
+    // se filtra a los items efectivamente resueltos.
+    const results = Array.isArray(res?.results) ? res.results : [];
+    const resolved = results
+        .map((r) =>
+            r && typeof r === "object" && !r.unresolvedReference ? r : null
+        )
+        .filter(Boolean);
+    return _normalizeItemList(resolved);
 }
 
 // =============================================================================
@@ -549,19 +500,17 @@ export async function queryReferencedItems(
 
 /**
  * Guard opcional para consumidores que quieran bloquear explicitamente
- * colecciones prohibidas antes de llamar al DAL. import { FORBIDDEN_COLLECTIONS }
- * desde internalConfig y validar en el modulo de negocio; este helper evita
- * repetir el patron.
+ * colecciones prohibidas antes de llamar al DAL.
  * @param {ReadonlyArray<string>} forbiddenList
  * @param {string} dataCollectionId
  */
 export function assertNotForbidden(forbiddenList, dataCollectionId) {
-  const id = _requireCollectionId(dataCollectionId);
-  const forbidden = Array.isArray(forbiddenList) ? forbiddenList : [];
-  if (forbidden.includes(id)) {
-    throw new Error(
-      `DAL_FORBIDDEN_COLLECTION: acceso prohibido a '${id}' (SSOT-09)`
-    );
-  }
-  return id;
+    const id = _requireCollectionId(dataCollectionId);
+    const forbidden = Array.isArray(forbiddenList) ? forbiddenList : [];
+    if (forbidden.includes(id)) {
+        throw new Error(
+            `DAL_FORBIDDEN_COLLECTION: acceso prohibido a '${id}' (SSOT-09)`
+        );
+    }
+    return id;
 }
