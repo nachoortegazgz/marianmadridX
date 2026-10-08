@@ -2,37 +2,56 @@
 /*
 =============================================================================
 MODULE: public/widgetBridge.js
-VERSION: v5011-F1-CANONICAL
+VERSION: v6000-BRIDGE-CANONICAL
 BASE NORMATIVA:
   - BIBLIA2 / BIBLIAV v5009-V20-FINAL-CONSOLIDATED-v4.2 (Bloque 1, D6, D10, R19)
   - CAMBIO.txt seccion 11 (cero duplicidades, cero alias)
   - Dossier CMS vivo 30/09/2026 (ServiciosCatalogo rev.88)
 RESPONSABILIDAD: Frontera unica y segura entre paginas Velo y widgets HTML.
-STANDARDS: G10 ASCII estricto. Modulo hoja (leaf).
+STANDARDS: G10 ASCII estricto. Modulo hoja (leaf). Sin dependencias.
 
 RESTRICCION ACICLICA OBLIGATORIA
   widgetBridge.js NO debe importar public/mmUtils.js ni modulos de backend.
   mmUtils.js reexporta este protocolo como facade; el SSOT vive aqui.
 
+CAMPOS CANONICOS DE MENSAJE (unicos admitidos en la frontera)
+  type       string   SCREAMING_SNAKE. Obligatorio. Dentro de allowedTypes.
+  payload    object   Plano. Opcional en entrada; se normaliza a {}.
+  messageId  string   Opcional en entrada. Obligatorio en salida.
+  requestId  string   Opcional. Si falta, replica messageId.
+  version    integer  OBLIGATORIO. Debe ser exactamente PROTOCOL_VERSION.
+
+  Cualquier otro campo entrante (source, status, meta, ...) se descarta en
+  normalizeMessage(): el bridge reemite siempre un objeto congelado con los
+  cinco campos canonicos y nada mas.
+
 CAMBIOS ROMPIENTES DE ALINEACION (grep antes de desplegar)
-  1. MESSAGETYPES          -> MESSAGE_TYPES   (nombre canonico SCREAMING_SNAKE)
-  2. Alias MESSAGE_TYPES / URLS / UI ELIMINADOS de este modulo.
-     El facade corto (URLS, UI) lo provee public/mmUtils.js.
-  3. replyToMessage() ELIMINADO (duplicado de reply() con args invertidos).
-  4. bridge.onMessage ELIMINADO como metodo -> bridge.subscribe() canonico.
-  5. options.onMessage ELIMINADO -> options.onWidgetMessage canonico.
-  6. Tolerancias de entrada ELIMINADAS: messageType, eventType, data, id.
-     Campos canonicos: type, payload, messageId, requestId, version.
-  7. Respuestas *_RES ya no se admiten por patron abierto: solo se acepta
-     <TIPO>_RES cuando <TIPO> esta en allowedTypes.
-  8. Origen: validacion activa por defecto (strictOrigin) con allowlist de
-     sufijos Wix; origenes opacos (blob:/data:/null) permitidos por defecto
-     porque el HTML Component se monta sobre iframe opaco.
+  1. bridge.postMessage() ELIMINADO. Era alias de send() con argumentos
+     invertidos y colisionaba semanticamente con widgetElement.postMessage().
+     Duplicidad prohibida por CAMBIO.txt seccion 11, igual que replyToMessage().
+     MIGRACION: bridge.send(type, payload)
+  2. export default ELIMINADO. Era alias del named export.
+     MIGRACION: import { createWidgetBridge } from "public/widgetBridge";
+  3. ADMIN_RESPONSE_TYPE ELIMINADO. Backdoor hardcoded fuera del SSOT
+     MESSAGE_TYPES que bypaseaba la whitelist desde v5011.
+     MIGRACION: createWidgetBridge(el, { allowedTypes: [...MM, "MM_ADMIN"] })
+  4. version pasa a ser OBLIGATORIO. Eliminado el default silencioso a
+     PROTOCOL_VERSION cuando llegaba undefined/null/"". Es la misma clase de
+     tolerancia de entrada ya eliminada para messageType/eventType/data/id.
+     MIGRACION: el widget debe emitir version: 1 (integer) en todo mensaje.
+  5. RESPONSE_TYPE_PATTERN corregido: {0,38} -> {0,35}. El patron anterior
+     admitia 43 caracteres mientras safeType() trunca a MAX_TYPE_LENGTH (40),
+     de modo que todo tipo _RES largo fallaba por truncamiento y no por
+     whitelist: diagnostico falso TYPE_NOT_ALLOWED sobre tipos legitimos.
+  6. CONSUMER_ERROR_HANDLER_FAILED deja de ser constante muerta. El fallo del
+     onError del consumidor se registra y se contiene; nunca rompe el bridge.
+  7. Set interno renombrado allowedTypes -> allowedTypeSet. Eliminada la
+     sombra de nombre contra bridge.allowedTypes (Array congelado).
 =============================================================================
 */
 
 /* ============================================================================
- * 1. PROTOCOLO — SSOT
+ * 1. PROTOCOLO - SSOT
  * ==========================================================================*/
 
 export const PROTOCOL_VERSION = 1;
@@ -53,8 +72,9 @@ export const PROTOCOL_URLS = Object.freeze({
 });
 
 /**
- * Timings de frontera. HANDSHAKE_TIMEOUT_MS y CONTEXT_TIMEOUT_MS dejan de
- * ser configuracion muerta: los consume el watchdog de este modulo.
+ * Timings de frontera. HANDSHAKE_TIMEOUT_MS y CONTEXT_TIMEOUT_MS no son
+ * configuracion muerta: los consume el watchdog de este modulo.
+ * FRONTEND_API_TIMEOUT_MS lo consume la pagina Velo sobre el backend.
  */
 export const PROTOCOL_UI = Object.freeze({
   FRONTEND_API_TIMEOUT_MS: 60000,
@@ -67,8 +87,9 @@ export const PROTOCOL_UI = Object.freeze({
  * ==========================================================================*/
 
 const RESPONSE_TYPE_SUFFIX = "_RES";
-const RESPONSE_TYPE_PATTERN = /^[A-Z][A-Z0-9_]{0,38}_RES$/;
-const ADMIN_RESPONSE_TYPE = "MM_ADMIN_RESPONSE";
+
+/** Base <= MAX_TYPE_LENGTH - 4 = 36 chars: 1 inicial + {0,35}. */
+const RESPONSE_TYPE_PATTERN = /^[A-Z][A-Z0-9_]{0,35}_RES$/;
 
 const MAX_TYPE_LENGTH = 40;
 const MAX_MESSAGE_ID_LENGTH = 120;
@@ -83,7 +104,15 @@ const DEFAULT_ALLOWED_ORIGIN_SUFFIXES = Object.freeze([
   ".editorx.com"
 ]);
 
-const OPAQUE_ORIGIN_PREFIXES = Object.freeze(["blob:", "data:", "filesystem:"]);
+/**
+ * El HTML Component de Wix se monta sobre iframe de origen opaco, por lo que
+ * estos origenes se admiten por defecto y se rigen por allowOpaqueOrigin.
+ */
+const OPAQUE_ORIGIN_PREFIXES = Object.freeze([
+  "blob:",
+  "data:",
+  "filesystem:"
+]);
 
 export const WIDGET_ERROR_CODE = Object.freeze({
   INVALID_WIDGET: "WIDGET_INVALID_HTML_COMPONENT",
@@ -106,12 +135,14 @@ export const WIDGET_ERROR_CODE = Object.freeze({
 
 const DEFAULT_ALLOWED_TYPES = Object.freeze(Object.values(MESSAGE_TYPES));
 
+const BRIDGE_DISCRIMINATOR = "WIX_HTML_COMPONENT_BRIDGE";
+
 const textEncoder = typeof TextEncoder === "function" ? new TextEncoder() : null;
 
 let instanceCounter = 0;
 
 /* ============================================================================
- * 3. HELPERS INTERNOS
+ * 3. HELPERS INTERNOS PUROS
  * ==========================================================================*/
 
 function safeObject(value) {
@@ -132,25 +163,31 @@ function safeMessageId(value) {
     .slice(0, MAX_MESSAGE_ID_LENGTH);
 }
 
-function toProtocolVersion(value) {
-  if (value === undefined || value === null || value === "") return PROTOCOL_VERSION;
-
+/**
+ * Lectura estricta de version. Sin default: ausencia o valor no entero
+ * positivo devuelve null y el mensaje se rechaza.
+ */
+function readProtocolVersion(value) {
   const parsed = Number(value);
 
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
 function estimateBytes(value) {
+  let serialized;
+
   try {
-    const serialized = JSON.stringify(value);
-
-    if (typeof serialized !== "string") return MAX_MESSAGE_BYTES + 1;
-
-    return textEncoder ? textEncoder.encode(serialized).length : serialized.length;
+    serialized = JSON.stringify(value);
   } catch (error) {
     // Estructura circular o no serializable: se trata como exceso de tamano.
     return MAX_MESSAGE_BYTES + 1;
   }
+
+  if (typeof serialized !== "string") {
+    return MAX_MESSAGE_BYTES + 1;
+  }
+
+  return textEncoder ? textEncoder.encode(serialized).length : serialized.length;
 }
 
 function countKeys(value) {
@@ -169,23 +206,28 @@ function countKeys(value) {
 
     for (let index = 0; index < keys.length; index += 1) {
       const child = current[keys[index]];
-      if (child && typeof child === "object") stack.push(child);
+
+      if (child && typeof child === "object") {
+        stack.push(child);
+      }
     }
   }
 
   return total;
 }
 
+/**
+ * Constructor canonico del tipo de respuesta de una peticion.
+ * Unico punto del sistema que concatena RESPONSE_TYPE_SUFFIX.
+ */
 export function buildResponseType(type) {
   return `${safeType(type)}${RESPONSE_TYPE_SUFFIX}`;
 }
 
-function isResponseType(type) {
-  return RESPONSE_TYPE_PATTERN.test(type);
-}
-
 function getResponseTypeBase(type) {
-  return isResponseType(type) ? type.slice(0, -RESPONSE_TYPE_SUFFIX.length) : "";
+  return RESPONSE_TYPE_PATTERN.test(type)
+    ? type.slice(0, -RESPONSE_TYPE_SUFFIX.length)
+    : "";
 }
 
 function resolveOriginPolicy(options) {
@@ -211,7 +253,9 @@ function resolveOriginPolicy(options) {
   return Object.freeze({
     mode: strict ? "suffix" : "off",
     exact: "",
-    suffixes: Object.freeze(custom.length > 0 ? custom : DEFAULT_ALLOWED_ORIGIN_SUFFIXES),
+    suffixes: Object.freeze(
+      custom.length > 0 ? custom : DEFAULT_ALLOWED_ORIGIN_SUFFIXES
+    ),
     allowOpaqueOrigin: options.allowOpaqueOrigin !== false
   });
 }
@@ -232,7 +276,10 @@ function getOriginHost(origin) {
   try {
     return new URL(origin).hostname.toLowerCase();
   } catch (error) {
-    return origin.replace(/^[a-z0-9+.-]+:\/\//i, "").split("/")[0].toLowerCase();
+    return origin
+      .replace(/^[a-z0-9+.-]+:\/\//i, "")
+      .split("/")[0]
+      .toLowerCase();
   }
 }
 
@@ -243,9 +290,15 @@ function isOriginAllowed(origin, policy) {
 
   const host = getOriginHost(origin);
 
-  return policy.suffixes.some((suffix) => host === suffix.replace(/^\./, "") || host.endsWith(suffix));
+  return policy.suffixes.some(
+    (suffix) => host === suffix.replace(/^\./, "") || host.endsWith(suffix)
+  );
 }
 
+/**
+ * Envuelve una promesa con timeout gestionado por el Set de timers del bridge,
+ * de modo que destroy() cancele tambien los watchdogs pendientes.
+ */
 function withManagedTimeout(promise, timeoutMs, code, timers) {
   return new Promise((resolve, reject) => {
     let settled = false;
@@ -287,77 +340,120 @@ function withManagedTimeout(promise, timeoutMs, code, timers) {
   });
 }
 
+function buildBridgeError(code, bridgeId, detail) {
+  const error = new Error(code);
+
+  error.code = code;
+  error.bridgeId = bridgeId;
+
+  if (detail !== null && detail !== undefined) {
+    error.detail = detail;
+  }
+
+  return error;
+}
+
 /* ============================================================================
  * 4. FABRICA DEL BRIDGE
  * ==========================================================================*/
 
+/**
+ * @param {Object} widgetElement  $w.HtmlComponent con onMessage/postMessage.
+ * @param {Object} [options]
+ * @param {string[]}   [options.allowedTypes]           Whitelist de tipos.
+ * @param {Function}   [options.onWidgetMessage]        Handler unico de negocio.
+ * @param {Function}   [options.onContextReady]         Resuelve el contexto a publicar.
+ * @param {Function}   [options.onError]                Handler de errores de frontera.
+ * @param {boolean}    [options.strictOrigin=true]      Activa validacion por sufijos.
+ * @param {string}     [options.allowedOrigin]          Origen exacto (tiene prioridad).
+ * @param {string[]}   [options.allowedOriginSuffixes]  Sufijos propios.
+ * @param {boolean}    [options.allowOpaqueOrigin=true] Admite blob:/data:/null.
+ * @param {number}     [options.handshakeTimeoutMs]
+ * @param {number}     [options.contextTimeoutMs]
+ * @returns {Readonly<Object>} Bridge congelado.
+ */
 export function createWidgetBridge(widgetElement, options = {}) {
   if (
     !widgetElement ||
     typeof widgetElement.onMessage !== "function" ||
     typeof widgetElement.postMessage !== "function"
   ) {
-    const error = new TypeError(WIDGET_ERROR_CODE.INVALID_WIDGET);
-    error.code = WIDGET_ERROR_CODE.INVALID_WIDGET;
-
-    throw error;
+    throw buildBridgeError(WIDGET_ERROR_CODE.INVALID_WIDGET, null, null);
   }
 
   const settings = safeObject(options);
 
   instanceCounter += 1;
-  const bridgeId = `wbridge-${instanceCounter.toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+
+  const bridgeId = `wbridge-${instanceCounter.toString(36)}-${Math.random()
+    .toString(36)
+    .slice(2, 8)}`;
 
   const originPolicy = resolveOriginPolicy(settings);
-  const allowedTypes = new Set(
+
+  const allowedTypeSet = new Set(
     Array.isArray(settings.allowedTypes) && settings.allowedTypes.length > 0
       ? settings.allowedTypes.map(safeType).filter(Boolean)
       : DEFAULT_ALLOWED_TYPES
   );
 
-  const handshakeTimeoutMs = Number(settings.handshakeTimeoutMs) > 0
-    ? Number(settings.handshakeTimeoutMs)
-    : PROTOCOL_UI.HANDSHAKE_TIMEOUT_MS;
+  const handshakeTimeoutMs =
+    Number(settings.handshakeTimeoutMs) > 0
+      ? Number(settings.handshakeTimeoutMs)
+      : PROTOCOL_UI.HANDSHAKE_TIMEOUT_MS;
 
-  const contextTimeoutMs = Number(settings.contextTimeoutMs) > 0
-    ? Number(settings.contextTimeoutMs)
-    : PROTOCOL_UI.CONTEXT_TIMEOUT_MS;
+  const contextTimeoutMs =
+    Number(settings.contextTimeoutMs) > 0
+      ? Number(settings.contextTimeoutMs)
+      : PROTOCOL_UI.CONTEXT_TIMEOUT_MS;
 
-  const onWidgetMessage = typeof settings.onWidgetMessage === "function" ? settings.onWidgetMessage : null;
-  const onContextReady = typeof settings.onContextReady === "function" ? settings.onContextReady : null;
-  const onError = typeof settings.onError === "function" ? settings.onError : () => {};
+  const onWidgetMessage =
+    typeof settings.onWidgetMessage === "function" ? settings.onWidgetMessage : null;
+
+  const onContextReady =
+    typeof settings.onContextReady === "function" ? settings.onContextReady : null;
+
+  const onError = typeof settings.onError === "function" ? settings.onError : null;
 
   let destroyed = false;
   let sequence = 0;
   let handshakeCompleted = false;
   let contextInFlight = false;
+  let contextPublished = false;
   let bridge = null;
 
   const listeners = new Set();
   const timers = new Set();
 
+  /* ---------------------------------------------------------------- */
+  /* Politica de tipos                                                 */
+  /* ---------------------------------------------------------------- */
+
   function isAllowedType(type) {
-    if (allowedTypes.has(type)) return true;
-    if (type === ADMIN_RESPONSE_TYPE) return true;
+    if (allowedTypeSet.has(type)) return true;
 
     const base = getResponseTypeBase(type);
 
-    return Boolean(base) && allowedTypes.has(base);
+    return Boolean(base) && allowedTypeSet.has(base);
   }
 
-  function fail(code, detail = null) {
-    const error = new Error(code);
-    error.code = code;
-    error.bridgeId = bridgeId;
+  /* ---------------------------------------------------------------- */
+  /* Errores y timers                                                  */
+  /* ---------------------------------------------------------------- */
 
-    if (detail !== null && detail !== undefined) {
-      error.detail = detail;
-    }
+  function fail(code, detail = null) {
+    const error = buildBridgeError(code, bridgeId, detail);
+
+    if (!onError) return error;
 
     try {
       onError(error, detail);
     } catch (consumerError) {
-      // El manejador de errores del consumidor nunca debe romper el bridge.
+      // El manejador del consumidor nunca debe romper el puente.
+      console.error(
+        `[widgetBridge] ${WIDGET_ERROR_CODE.CONSUMER_ERROR_HANDLER_FAILED}`,
+        { bridgeId, code, message: consumerError?.message }
+      );
     }
 
     return error;
@@ -367,6 +463,10 @@ export function createWidgetBridge(widgetElement, options = {}) {
     timers.forEach((timer) => clearTimeout(timer));
     timers.clear();
   }
+
+  /* ---------------------------------------------------------------- */
+  /* Validacion de entrada                                             */
+  /* ---------------------------------------------------------------- */
 
   function extractEvent(event) {
     const classified = classifyOrigin(event?.origin);
@@ -384,12 +484,12 @@ export function createWidgetBridge(widgetElement, options = {}) {
     const message = safeObject(event?.data);
 
     if (estimateBytes(message) > MAX_MESSAGE_BYTES) {
-      fail(WIDGET_ERROR_CODE.MESSAGE_TOO_LARGE);
+      fail(WIDGET_ERROR_CODE.MESSAGE_TOO_LARGE, { bridgeId });
       return null;
     }
 
     if (countKeys(message) > MAX_PAYLOAD_KEYS) {
-      fail(WIDGET_ERROR_CODE.PAYLOAD_TOO_COMPLEX);
+      fail(WIDGET_ERROR_CODE.PAYLOAD_TOO_COMPLEX, { bridgeId });
       return null;
     }
 
@@ -404,13 +504,17 @@ export function createWidgetBridge(widgetElement, options = {}) {
     }
 
     if (!isAllowedType(type)) {
-      return { message: null, code: WIDGET_ERROR_CODE.TYPE_NOT_ALLOWED };
+      return { message: null, code: WIDGET_ERROR_CODE.TYPE_NOT_ALLOWED, detail: { type } };
     }
 
-    const version = toProtocolVersion(source.version);
+    const version = readProtocolVersion(source.version);
 
     if (version !== PROTOCOL_VERSION) {
-      return { message: null, code: WIDGET_ERROR_CODE.VERSION_UNSUPPORTED };
+      return {
+        message: null,
+        code: WIDGET_ERROR_CODE.VERSION_UNSUPPORTED,
+        detail: { received: source.version, expected: PROTOCOL_VERSION }
+      };
     }
 
     const messageId = safeMessageId(source.messageId);
@@ -424,19 +528,14 @@ export function createWidgetBridge(widgetElement, options = {}) {
         version: PROTOCOL_VERSION,
         bridgeId
       }),
-      code: null
+      code: null,
+      detail: null
     };
   }
 
-  function notifyListeners(message) {
-    listeners.forEach((listener) => {
-      try {
-        listener(message, bridge);
-      } catch (error) {
-        fail(WIDGET_ERROR_CODE.LISTENER_FAILED, error);
-      }
-    });
-  }
+  /* ---------------------------------------------------------------- */
+  /* Salida                                                            */
+  /* ---------------------------------------------------------------- */
 
   function nextMessageId() {
     sequence += 1;
@@ -446,36 +545,38 @@ export function createWidgetBridge(widgetElement, options = {}) {
     );
   }
 
+  /**
+ * Emision canonica y unica hacia el widget.
+ * @param {string} type               Tipo dentro de allowedTypes.
+ * @param {Object} [payload]          Carga util plana.
+ * @param {string|null} [messageId]   Id de correlacion de una peticion previa.
+ * @returns {string} messageId emitido.
+ */
   function send(type, payload = {}, messageId = null) {
     if (destroyed) {
-      const error = new Error(WIDGET_ERROR_CODE.DESTROYED);
-      error.code = WIDGET_ERROR_CODE.DESTROYED;
-
-      throw error;
+      throw buildBridgeError(WIDGET_ERROR_CODE.DESTROYED, bridgeId, null);
     }
 
     const normalizedType = safeType(type);
 
     if (!isAllowedType(normalizedType)) {
-      const error = new Error(WIDGET_ERROR_CODE.TYPE_NOT_ALLOWED);
-      error.code = WIDGET_ERROR_CODE.TYPE_NOT_ALLOWED;
-
-      throw error;
+      throw buildBridgeError(WIDGET_ERROR_CODE.TYPE_NOT_ALLOWED, bridgeId, {
+        type: normalizedType
+      });
     }
 
     const message = Object.freeze({
       type: normalizedType,
-      payload: safeObject(payload),
+      payload: Object.freeze(safeObject(payload)),
       messageId: safeMessageId(messageId) || nextMessageId(),
       version: PROTOCOL_VERSION,
       bridgeId
     });
 
     if (estimateBytes(message) > MAX_MESSAGE_BYTES) {
-      const error = new Error(WIDGET_ERROR_CODE.MESSAGE_TOO_LARGE);
-      error.code = WIDGET_ERROR_CODE.MESSAGE_TOO_LARGE;
-
-      throw error;
+      throw buildBridgeError(WIDGET_ERROR_CODE.MESSAGE_TOO_LARGE, bridgeId, {
+        type: normalizedType
+      });
     }
 
     widgetElement.postMessage(message);
@@ -490,16 +591,25 @@ export function createWidgetBridge(widgetElement, options = {}) {
 
     if (typeof requestMessage !== "object") return "";
 
-    return safeMessageId(requestMessage.messageId) || safeMessageId(requestMessage.requestId);
+    return (
+      safeMessageId(requestMessage.messageId) || safeMessageId(requestMessage.requestId)
+    );
   }
 
+  /**
+ * Respuesta correlacionada a un mensaje entrante.
+ * @param {string} type
+ * @param {Object} [payload]
+ * @param {Object|string|null} [requestMessage] Mensaje original o su id.
+ * @returns {string} messageId emitido.
+ */
   function reply(type, payload = {}, requestMessage = null) {
     return send(type, payload, resolveCorrelationId(requestMessage) || null);
   }
 
-  function postMessage(payload = {}, type = MESSAGE_TYPES.CONTEXT) {
-    return send(type, payload);
-  }
+  /* ---------------------------------------------------------------- */
+  /* Suscripcion                                                       */
+  /* ---------------------------------------------------------------- */
 
   function subscribe(callback) {
     if (destroyed || typeof callback !== "function") {
@@ -513,8 +623,26 @@ export function createWidgetBridge(widgetElement, options = {}) {
     };
   }
 
+  function notifyListeners(message) {
+    listeners.forEach((listener) => {
+      try {
+        listener(message, bridge);
+      } catch (error) {
+        fail(WIDGET_ERROR_CODE.LISTENER_FAILED, error);
+      }
+    });
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Handshake y contexto                                              */
+  /* ---------------------------------------------------------------- */
+
+  /**
+ * Publica el contexto una unica vez por bridge. Los reintentos de READY del
+ * widget no provocan re-resolucion ni duplicidad de CONTEXT.
+ */
   function publishContext(message) {
-    if (!onContextReady || contextInFlight) return;
+    if (!onContextReady || contextInFlight || contextPublished) return;
 
     contextInFlight = true;
 
@@ -528,6 +656,8 @@ export function createWidgetBridge(widgetElement, options = {}) {
         contextInFlight = false;
 
         if (destroyed || context === undefined || context === null) return;
+
+        contextPublished = true;
 
         send(MESSAGE_TYPES.CONTEXT, context, message.messageId || null);
       })
@@ -551,11 +681,15 @@ export function createWidgetBridge(widgetElement, options = {}) {
 
       if (destroyed || handshakeCompleted) return;
 
-      fail(WIDGET_ERROR_CODE.HANDSHAKE_TIMEOUT, { bridgeId });
+      fail(WIDGET_ERROR_CODE.HANDSHAKE_TIMEOUT, { bridgeId, handshakeTimeoutMs });
     }, handshakeTimeoutMs);
 
     timers.add(timer);
   }
+
+  /* ---------------------------------------------------------------- */
+  /* Listener unico sobre el HTML Component                            */
+  /* ---------------------------------------------------------------- */
 
   const unsubscribeWidget = widgetElement.onMessage((event) => {
     if (destroyed) return;
@@ -568,7 +702,7 @@ export function createWidgetBridge(widgetElement, options = {}) {
       const normalized = normalizeMessage(extracted);
 
       if (!normalized.message) {
-        fail(normalized.code || WIDGET_ERROR_CODE.MESSAGE_REJECTED);
+        fail(normalized.code || WIDGET_ERROR_CODE.MESSAGE_REJECTED, normalized.detail);
         return;
       }
 
@@ -598,13 +732,17 @@ export function createWidgetBridge(widgetElement, options = {}) {
 
   armHandshakeWatchdog();
 
+  /* ---------------------------------------------------------------- */
+  /* Superficie publica congelada                                      */
+  /* ---------------------------------------------------------------- */
+
   bridge = Object.freeze({
-    type: "WIX_HTML_COMPONENT_BRIDGE",
+    type: BRIDGE_DISCRIMINATOR,
     bridgeId,
     protocolVersion: PROTOCOL_VERSION,
     widget: widgetElement,
     originPolicyMode: originPolicy.mode,
-    allowedTypes: Object.freeze(Array.from(allowedTypes)),
+    allowedTypes: Object.freeze(Array.from(allowedTypeSet)),
 
     get destroyed() {
       return destroyed;
@@ -614,9 +752,12 @@ export function createWidgetBridge(widgetElement, options = {}) {
       return handshakeCompleted;
     },
 
+    get contextPublished() {
+      return contextPublished;
+    },
+
     send,
     reply,
-    postMessage,
     subscribe,
 
     destroy() {
@@ -639,5 +780,3 @@ export function createWidgetBridge(widgetElement, options = {}) {
 
   return bridge;
 }
-
-export default createWidgetBridge;
